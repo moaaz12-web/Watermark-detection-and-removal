@@ -1,8 +1,8 @@
-# Watermark Detection, Segmentation, and Inpainting POC
+# Watermark Detection, Segmentation, and Inpainting
 
-This repository is a set of Google Colab notebooks for evaluating a watermark-removal workflow on product images. The workflow identifies suspected watermark overlays, turns their bounding boxes into pixel masks, and uses image inpainting to produce a cleaned image. The batch notebooks preserve per-image artifacts and reports so detections and removal decisions can be reviewed.
+This repository contains a research-driven set of Google Colab notebooks for watermark detection, segmentation, and inpainting on product images. The workflow identifies suspected watermark overlays, turns their bounding boxes into pixel masks, and uses image inpainting to produce a cleaned image. The batch notebooks preserve per-image artifacts and reports so detections and removal decisions can be reviewed.
 
-The notebooks are prototypes rather than a packaged application: they contain Colab commands, runtime installation steps, model downloads, and paths that must be adapted for the environment where they are run.
+The notebooks are designed for Colab execution and include runtime installation steps, model downloads, and paths that must be adapted for the environment where they are run.
 
 ## Overall workflow
 
@@ -19,6 +19,23 @@ Product images
 ```
 
 Background removal uses BRIA RMBG to create both a white-background image for the detector/inpainter and a foreground mask of the product. GroundingDINO is prompted with watermark-related text; YOLO uses supplied custom weights. SAM 2 refines either detector's box into a mask. LaMa fills the pixels represented by the final mask.
+
+## Technology sources and model provenance
+
+The notebooks use the following primary projects and model sources. Custom weight files referenced only by local Colab paths are called out separately because their training data and origin are not included in this repository.
+
+| Technology | Purpose in this implementation | Primary source / model used |
+| --- | --- | --- |
+| Grounded-SAM-2 | Single-image R&D demo and Colab integration of GroundingDINO with SAM 2. | [IDEA-Research/Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2) |
+| GroundingDINO | Prompt-driven watermark candidate detection. | [Official GroundingDINO repository](https://github.com/IDEA-Research/GroundingDINO); model cards for [grounding-dino-base](https://huggingface.co/IDEA-Research/grounding-dino-base) and [grounding-dino-tiny](https://huggingface.co/IDEA-Research/grounding-dino-tiny) |
+| SAM 2 / SAM 2.1 | Pixel-level segmentation from detector bounding boxes. | [Meta SAM 2 repository and checkpoint instructions](https://github.com/facebookresearch/sam2); the notebooks download the [SAM 2.1 Hiera Large checkpoint](https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt) |
+| YOLO11 / Ultralytics | Custom-weight watermark candidate detection. | [Ultralytics YOLO11 documentation](https://docs.ultralytics.com/models/yolo11/) and [Ultralytics source repository](https://github.com/ultralytics/ultralytics) |
+| OWLv2 | Optional binary classifier gate for the YOLO path. | [Google OWLv2 base patch-16 ensemble model card](https://huggingface.co/google/owlv2-base-patch16-ensemble) |
+| BRIA RMBG 1.4 | Background removal, white-background compositing, and product foreground masks. | [BRIA RMBG-1.4 model card](https://huggingface.co/briaai/RMBG-1.4) |
+| LaMa | Inpainting the final, approved watermark mask. | [LaMa source repository](https://github.com/advimman/lama); [Big-LaMa model download used by the notebooks](https://huggingface.co/smartywu/big-lama) |
+| PyTorch and Transformers | Runtime, model loading, image tensors, and Hugging Face model APIs. | [PyTorch](https://pytorch.org/) and [Hugging Face Transformers](https://github.com/huggingface/transformers) |
+
+The notebook-specific custom files `yolo11x-train28-best.pt` and `far5y1y5-8000.pt` are referenced from `/content`, but are not included here and have no source URL recorded in the notebooks. Add their training/provenance links before presenting a fully reproducible or externally auditable run. Review each upstream project's license and model terms before use.
 
 ## Sample results
 
@@ -63,14 +80,26 @@ The images below are end-to-end pipeline previews. Each one shows, from left to 
 
 | Notebook | Objective | Detection approach | Best use |
 | --- | --- | --- | --- |
+| [`watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb`](watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb) | Configurable, reviewable batch workflow that combines both detector paths and protects against altering the product. | RMBG, optional GroundingDINO and YOLO, merged SAM 2 masks, safety gate, and LaMa. | The most complete notebook and the recommended starting point for controlled batch evaluation. |
 | [`rnd_complete.ipynb`](rnd_complete.ipynb) | R&D and single-image validation of the component models. | GroundingDINO + SAM 2 demo, then OWLv2 classifier + YOLO + SAM 2. | Trying models, weights, prompts, masks, and LaMa on one image before a batch run. |
 | [`watermark_batch_rmbg_yolo_sam2_lama.ipynb`](watermark_batch_rmbg_yolo_sam2_lama.ipynb) | Batch processing with a YOLO-based watermark detector. | RMBG, optional OWLv2 clean-image gate, YOLO, SAM 2, and LaMa. | Running the original custom-YOLO batch path. |
 | [`watermark_batch_rmbg_grounding_dino_sam2_lama.ipynb`](watermark_batch_rmbg_grounding_dino_sam2_lama.ipynb) | Batch processing with prompt-driven detection rather than custom YOLO weights. | RMBG, GroundingDINO, SAM 2, and LaMa. | Testing whether text-prompted detection generalizes better to new watermark styles. |
-| [`watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb`](watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb) | Configurable, reviewable batch workflow that combines both detector paths and protects against altering the product. | RMBG, optional GroundingDINO and YOLO, merged SAM 2 masks, safety gate, and LaMa. | The most complete notebook and the recommended starting point for controlled batch evaluation. |
+
+### `watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb`: combined and guarded workflow
+
+This is the most comprehensive notebook. It supports two configured datasets and lets the operator enable or disable background removal, GroundingDINO, YOLO, and LaMa independently. By default it runs both detectors:
+
+1. RMBG produces the white-background watermark input and the product foreground mask.
+2. GroundingDINO and/or YOLO generate detections. The optional OWLv2 classifier can only gate the YOLO branch; it never suppresses GroundingDINO.
+3. SAM 2 segments detections for each enabled detector. The notebook retains detector-specific outputs and unions their masks into the mask passed to LaMa.
+4. The product-overlap safety gate compares each proposed removal mask with the RMBG foreground mask. A detection covering more than `GATE_PER_DETECTION_BLOCK` of the product is dropped. If the surviving union covers more than `GATE_COMBINED_BLOCK`, the image is blocked from LaMa and the untouched watermark input is copied as the final image. Coverage above `GATE_COMBINED_WARN`, but below the block threshold, is processed with a warning.
+5. The notebook writes review artifacts, including gate reports, and includes cells to preview gate decisions, export a flattened final-image folder, and recalibrate gate thresholds offline from saved masks.
+
+The default thresholds are based on previous notebook runs and are starting points, not universally safe values. Review `gate_report.csv`, `gate_detections.csv`, annotations, and final images before treating a batch as approved.
 
 ### `rnd_complete.ipynb`: exploratory single-image workflow
 
-This notebook is the proof-of-concept and model-integration workspace. It has three main parts:
+This notebook is the exploratory model-integration workspace. It has three main parts:
 
 1. It installs Grounded-SAM-2, downloads the SAM 2.1 large checkpoint, and runs the Grounded-SAM-2 demo with a text prompt such as `watermark`, `logo`, and `text overlay`. It then decodes the model's RLE segmentations and saves individual and combined PNG masks.
 2. It implements a second detector path: an OWLv2-based binary classifier first estimates whether an image is watermarked; a custom YOLO model locates candidate regions; SAM 2 turns those regions into masks. It writes the combined mask, individual masks, an annotated image, and a JSON result file.
@@ -95,18 +124,6 @@ Use this notebook when the supplied `yolo11x-train28-best.pt` weights are the pr
 This notebook retains the same directory handling, RMBG preprocessing, SAM 2 segmentation, LaMa inpainting, and reporting layout as the YOLO batch notebook. The difference is the detector: GroundingDINO uses a text prompt (by default, `watermarked text, logo, watermark text overlay.`) to propose boxes, and SAM 2 converts those boxes into masks.
 
 It uses the `IDEA-Research/grounding-dino-tiny` model and exposes box and text thresholds in the configuration cell. Choose this variant to assess prompt-based detection independently of the custom YOLO weights.
-
-### `watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb`: combined and guarded workflow
-
-This is the most comprehensive notebook. It supports two configured datasets and lets the operator enable or disable background removal, GroundingDINO, YOLO, and LaMa independently. By default it runs both detectors:
-
-1. RMBG produces the white-background watermark input and the product foreground mask.
-2. GroundingDINO and/or YOLO generate detections. The optional OWLv2 classifier can only gate the YOLO branch; it never suppresses GroundingDINO.
-3. SAM 2 segments detections for each enabled detector. The notebook retains detector-specific outputs and unions their masks into the mask passed to LaMa.
-4. The product-overlap safety gate compares each proposed removal mask with the RMBG foreground mask. A detection covering more than `GATE_PER_DETECTION_BLOCK` of the product is dropped. If the surviving union covers more than `GATE_COMBINED_BLOCK`, the image is blocked from LaMa and the untouched watermark input is copied as the final image. Coverage above `GATE_COMBINED_WARN`, but below the block threshold, is processed with a warning.
-5. The notebook writes review artifacts, including gate reports, and includes cells to preview gate decisions, export a flattened final-image folder, and recalibrate gate thresholds offline from saved masks.
-
-The default thresholds are based on previous notebook runs and are starting points, not universally safe values. Review `gate_report.csv`, `gate_detections.csv`, annotations, and final images before treating a batch as approved.
 
 ## Running a batch notebook
 
@@ -145,23 +162,6 @@ Each batch notebook creates a separate directory for every input image, retainin
 ```
 
 `pipeline_result.json` captures the source and generated paths, detector status, detection counts, masks, and errors for an image. The combined notebook additionally produces `gate_report.csv` (one decision per image) and `gate_detections.csv` (one coverage decision per detection). These reports are the primary audit trail for reviewing whether a product may have been modified.
-
-## Technology sources and model provenance
-
-The notebooks use the following primary projects and model sources. Custom weight files referenced only by local Colab paths are called out separately because their training data and origin are not included in this repository.
-
-| Technology | Purpose in this POC | Primary source / model used |
-| --- | --- | --- |
-| Grounded-SAM-2 | Single-image R&D demo and Colab integration of GroundingDINO with SAM 2. | [IDEA-Research/Grounded-SAM-2](https://github.com/IDEA-Research/Grounded-SAM-2) |
-| GroundingDINO | Prompt-driven watermark candidate detection. | [Official GroundingDINO repository](https://github.com/IDEA-Research/GroundingDINO); model cards for [grounding-dino-base](https://huggingface.co/IDEA-Research/grounding-dino-base) and [grounding-dino-tiny](https://huggingface.co/IDEA-Research/grounding-dino-tiny) |
-| SAM 2 / SAM 2.1 | Pixel-level segmentation from detector bounding boxes. | [Meta SAM 2 repository and checkpoint instructions](https://github.com/facebookresearch/sam2); the notebooks download the [SAM 2.1 Hiera Large checkpoint](https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt) |
-| YOLO11 / Ultralytics | Custom-weight watermark candidate detection. | [Ultralytics YOLO11 documentation](https://docs.ultralytics.com/models/yolo11/) and [Ultralytics source repository](https://github.com/ultralytics/ultralytics) |
-| OWLv2 | Optional binary classifier gate for the YOLO path. | [Google OWLv2 base patch-16 ensemble model card](https://huggingface.co/google/owlv2-base-patch16-ensemble) |
-| BRIA RMBG 1.4 | Background removal, white-background compositing, and product foreground masks. | [BRIA RMBG-1.4 model card](https://huggingface.co/briaai/RMBG-1.4) |
-| LaMa | Inpainting the final, approved watermark mask. | [LaMa source repository](https://github.com/advimman/lama); [Big-LaMa model download used by the notebooks](https://huggingface.co/smartywu/big-lama) |
-| PyTorch and Transformers | Runtime, model loading, image tensors, and Hugging Face model APIs. | [PyTorch](https://pytorch.org/) and [Hugging Face Transformers](https://github.com/huggingface/transformers) |
-
-The notebook-specific custom files `yolo11x-train28-best.pt` and `far5y1y5-8000.pt` are referenced from `/content`, but are not included here and have no source URL recorded in the notebooks. Add their training/provenance links before presenting a fully reproducible or externally auditable run. Review each upstream project's license and model terms before use.
 
 ## Important operational notes
 
