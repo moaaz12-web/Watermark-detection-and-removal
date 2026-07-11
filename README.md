@@ -24,44 +24,49 @@ Background removal uses BRIA RMBG to create both a white-background image for th
 
 The images below are end-to-end pipeline previews. Each one shows, from left to right: the source image, watermark-processing input, RMBG foreground mask, combined removal mask, detector annotation, and final inpainted image. They are representative examples for visual review, not accuracy benchmarks.
 
-<table>
-  <tr>
-    <td width="50%" align="center">
-      <img src="images/image.png" alt="Pipeline result sample 1" />
-      <br /><sub>Sample 1</sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="images/image%20copy.png" alt="Pipeline result sample 2" />
-      <br /><sub>Sample 2</sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" align="center">
-      <img src="images/image%20copy%202.png" alt="Pipeline result sample 3" />
-      <br /><sub>Sample 3</sub>
-    </td>
-    <td width="50%" align="center">
-      <img src="images/image%20copy%203.png" alt="Pipeline result sample 4" />
-      <br /><sub>Sample 4</sub>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" align="center">
-      <img src="images/image%20copy%204.png" alt="Pipeline result sample 5" />
-      <br /><sub>Sample 5</sub>
-    </td>
-    <td width="50%"></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="images/image.png" alt="Pipeline result sample 1" width="100%" />
+  <br /><sub>Sample 1</sub>
+</p>
+
+<p align="center">
+  <img src="images/image%20copy.png" alt="Pipeline result sample 2" width="100%" />
+  <br /><sub>Sample 2</sub>
+</p>
+
+<p align="center">
+  <img src="images/image%20copy%202.png" alt="Pipeline result sample 3" width="100%" />
+  <br /><sub>Sample 3</sub>
+</p>
+
+<p align="center">
+  <img src="images/image%20copy%203.png" alt="Pipeline result sample 4" width="100%" />
+  <br /><sub>Sample 4</sub>
+</p>
+
+<p align="center">
+  <img src="images/image%20copy%204.png" alt="Pipeline result sample 5" width="100%" />
+  <br /><sub>Sample 5</sub>
+</p>
+
+<p align="center">
+  <img src="images/image%20copy%205.png" alt="Pipeline result sample 6" width="100%" />
+  <br /><sub>Sample 6</sub>
+</p>
+
+<p align="center">
+  <img src="images/image%20copy%206.png" alt="Pipeline result sample 7" width="100%" />
+  <br /><sub>Sample 7</sub>
+</p>
 
 ## Notebook guide
 
 | Notebook | Objective | Detection approach | Best use |
 | --- | --- | --- | --- |
 | [`rnd_complete.ipynb`](rnd_complete.ipynb) | R&D and single-image validation of the component models. | GroundingDINO + SAM 2 demo, then OWLv2 classifier + YOLO + SAM 2. | Trying models, weights, prompts, masks, and LaMa on one image before a batch run. |
-| [`watermark_batch_pipeline.ipynb`](watermark_batch_pipeline.ipynb) | Batch processing with a YOLO-based watermark detector. | Optional OWLv2 clean-image gate, YOLO, then SAM 2. | Running the original custom-YOLO batch path. |
-| [`watermark_batch_pipeline_grounding_dino_sam.ipynb`](watermark_batch_pipeline_grounding_dino_sam.ipynb) | Batch processing with prompt-driven detection rather than custom YOLO weights. | GroundingDINO, then SAM 2. | Testing whether text-prompted detection generalizes better to new watermark styles. |
-| [`watermark_batch_pipeline_combined.ipynb`](watermark_batch_pipeline_combined.ipynb) | Configurable, reviewable batch workflow that combines both detector paths and protects against altering the product. | Optional GroundingDINO and YOLO; SAM 2 masks are merged. | The most complete notebook and the recommended starting point for controlled batch evaluation. |
+| [`watermark_batch_rmbg_yolo_sam2_lama.ipynb`](watermark_batch_rmbg_yolo_sam2_lama.ipynb) | Batch processing with a YOLO-based watermark detector. | RMBG, optional OWLv2 clean-image gate, YOLO, SAM 2, and LaMa. | Running the original custom-YOLO batch path. |
+| [`watermark_batch_rmbg_grounding_dino_sam2_lama.ipynb`](watermark_batch_rmbg_grounding_dino_sam2_lama.ipynb) | Batch processing with prompt-driven detection rather than custom YOLO weights. | RMBG, GroundingDINO, SAM 2, and LaMa. | Testing whether text-prompted detection generalizes better to new watermark styles. |
+| [`watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb`](watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb) | Configurable, reviewable batch workflow that combines both detector paths and protects against altering the product. | RMBG, optional GroundingDINO and YOLO, merged SAM 2 masks, safety gate, and LaMa. | The most complete notebook and the recommended starting point for controlled batch evaluation. |
 
 ### `rnd_complete.ipynb`: exploratory single-image workflow
 
@@ -73,7 +78,7 @@ This notebook is the proof-of-concept and model-integration workspace. It has th
 
 Use this notebook to validate an image path, model checkpoint, custom classifier/YOLO weights, detector prompt, and mask quality. It is not intended for directory-scale processing.
 
-### `watermark_batch_pipeline.ipynb`: YOLO batch workflow
+### `watermark_batch_rmbg_yolo_sam2_lama.ipynb`: YOLO batch workflow
 
 This is the first production-oriented batch version of the R&D path. It recursively reads common image formats from category subfolders and mirrors those folders in its output tree. Its pipeline is:
 
@@ -85,13 +90,13 @@ This is the first production-oriented batch version of the R&D path. It recursiv
 
 Use this notebook when the supplied `yolo11x-train28-best.pt` weights are the preferred detector and you want a simpler detector path.
 
-### `watermark_batch_pipeline_grounding_dino_sam.ipynb`: GroundingDINO batch workflow
+### `watermark_batch_rmbg_grounding_dino_sam2_lama.ipynb`: GroundingDINO batch workflow
 
 This notebook retains the same directory handling, RMBG preprocessing, SAM 2 segmentation, LaMa inpainting, and reporting layout as the YOLO batch notebook. The difference is the detector: GroundingDINO uses a text prompt (by default, `watermarked text, logo, watermark text overlay.`) to propose boxes, and SAM 2 converts those boxes into masks.
 
 It uses the `IDEA-Research/grounding-dino-tiny` model and exposes box and text thresholds in the configuration cell. Choose this variant to assess prompt-based detection independently of the custom YOLO weights.
 
-### `watermark_batch_pipeline_combined.ipynb`: combined and guarded workflow
+### `watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb`: combined and guarded workflow
 
 This is the most comprehensive notebook. It supports two configured datasets and lets the operator enable or disable background removal, GroundingDINO, YOLO, and LaMa independently. By default it runs both detectors:
 
@@ -169,4 +174,4 @@ The notebook-specific custom files `yolo11x-train28-best.pt` and `far5y1y5-8000.
 
 ## Suggested notebook selection
 
-Start with `rnd_complete.ipynb` to establish that masks and inpainting are sensible for representative images. Then compare the YOLO-only and GroundingDINO-only batch notebooks if detector quality is uncertain. Use `watermark_batch_pipeline_combined.ipynb` for final controlled experiments because it preserves both detector traces and includes the product-overlap safety gate.
+Start with `rnd_complete.ipynb` to establish that masks and inpainting are sensible for representative images. Then compare the YOLO-only and GroundingDINO-only batch notebooks if detector quality is uncertain. Use `watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb` for final controlled experiments because it preserves both detector traces and includes the product-overlap safety gate.
