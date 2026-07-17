@@ -202,7 +202,9 @@ def _reject_unresolved_values(value: object, path: str = "config") -> None:
     elif isinstance(value, str):
         normalized = value.strip().lower()
         if normalized in _INVALID_SENTINELS or re.search(r"<[^>]+>", value):
-            raise InvalidConfigurationError(f"{path} contains unresolved or mutable value {value!r}")
+            raise InvalidConfigurationError(
+                f"{path} contains unresolved or mutable value {value!r}"
+            )
 
 
 def load_pipeline_config(path: Path) -> LoadedPipelineConfig:

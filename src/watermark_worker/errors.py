@@ -16,13 +16,20 @@ class InvalidManifestError(WorkerError):
         super().__init__(message, ErrorCode.INVALID_MANIFEST)
 
 
+class InvalidCliError(WorkerError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, ErrorCode.INVALID_CLI)
+
+
 class InvalidConfigurationError(WorkerError):
     def __init__(self, message: str) -> None:
         super().__init__(message, ErrorCode.INVALID_CONFIGURATION)
 
 
 class ModelValidationError(WorkerError):
-    def __init__(self, message: str, error_code: ErrorCode = ErrorCode.MODEL_CHECKSUM_MISMATCH) -> None:
+    def __init__(
+        self, message: str, error_code: ErrorCode = ErrorCode.MODEL_CHECKSUM_MISMATCH
+    ) -> None:
         super().__init__(message, error_code)
 
 
@@ -32,7 +39,9 @@ class GpuInitializationError(WorkerError):
 
 
 class PermanentStorageError(WorkerError):
-    def __init__(self, message: str, error_code: ErrorCode = ErrorCode.STORAGE_PERMISSION_DENIED) -> None:
+    def __init__(
+        self, message: str, error_code: ErrorCode = ErrorCode.STORAGE_PERMISSION_DENIED
+    ) -> None:
         super().__init__(message, error_code)
 
 

@@ -56,9 +56,7 @@ def validate_manifest(
     if manifest_uri is None:
         raise InvalidManifestError("manifest URI is required for a GCS manifest")
     manifest_location = parse_gcs_uri(manifest_uri, field_name="manifest URI")
-    expected_manifest_object = (
-        f"{manifest.tenant_id}/{manifest.job_id}/input-manifest.json"
-    )
+    expected_manifest_object = f"{manifest.tenant_id}/{manifest.job_id}/input-manifest.json"
     if (
         manifest_location.bucket not in policy.allowed_manifest_buckets
         or manifest_location.object_name != expected_manifest_object

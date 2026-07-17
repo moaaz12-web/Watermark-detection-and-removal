@@ -35,7 +35,9 @@ Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Generation = Annotated[str, StringConstraints(pattern=r"^[1-9][0-9]*$")]
 Identifier = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?$"),
+    StringConstraints(
+        min_length=1, max_length=64, pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?$"
+    ),
 ]
 
 
@@ -102,6 +104,7 @@ _EXIT_CODE_MAP: dict[ErrorCode, ExitCode] = {
     ErrorCode.INVALID_CLI: ExitCode.INVALID_INPUT,
     ErrorCode.INVALID_MANIFEST: ExitCode.INVALID_INPUT,
     ErrorCode.INVALID_CONFIGURATION: ExitCode.INVALID_INPUT,
+    ErrorCode.CHECKSUM_MISMATCH: ExitCode.INVALID_INPUT,
     ErrorCode.MODEL_MISSING: ExitCode.MODEL_FAILURE,
     ErrorCode.MODEL_CHECKSUM_MISMATCH: ExitCode.MODEL_FAILURE,
     ErrorCode.CUDA_UNAVAILABLE: ExitCode.GPU_FAILURE,
@@ -327,7 +330,9 @@ def validate_worker_image_digest(value: str, *, require_container_digest: bool) 
     if require_container_digest:
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
             raise ValueError("GCS execution requires an immutable sha256 worker image digest")
-    elif not (re.fullmatch(r"sha256:[0-9a-f]{64}", value) or re.fullmatch(r"local:[A-Za-z0-9_.-]{1,80}", value)):
+    elif not (
+        re.fullmatch(r"sha256:[0-9a-f]{64}", value)
+        or re.fullmatch(r"local:[A-Za-z0-9_.-]{1,80}", value)
+    ):
         raise ValueError("worker image identity must be sha256:<digest> or local:<version>")
     return value
-

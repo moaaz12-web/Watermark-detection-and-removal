@@ -22,7 +22,6 @@ from watermark_worker.result_writer import (
 )
 from watermark_worker.storage import LocalStorageAdapter
 
-
 SHA_A = "a" * 64
 SHA_B = "b" * 64
 
@@ -49,7 +48,9 @@ def source_identity() -> InputIdentity:
     )
 
 
-def blocked_result(writer: ResultWriter, output_prefix: str, config_sha256: str = SHA_A) -> ItemResult:
+def blocked_result(
+    writer: ResultWriter, output_prefix: str, config_sha256: str = SHA_A
+) -> ItemResult:
     return ItemResult(
         schema_version=1,
         job_id="wm_123",
@@ -241,3 +242,47 @@ def test_job_marker_gates_validated_output_manifest(tmp_path: Path) -> None:
     assert job.marker.output_manifest == job.output_manifest_ref
     assert job.marker_ref.uri.endswith("/tenant_17/wm_123/_COMPLETE.json")
     assert writer.validate_completed_job(job.marker_ref.uri, run_identity()).job_id == "wm_123"
+
+
+def test_compatible_job_replay_ignores_only_completion_timestamp(tmp_path: Path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    writer = ResultWriter(storage)
+    item_prefix = "tenant_17/wm_123/asset_123/"
+    item = writer.write_item(
+        result=blocked_result(writer, item_prefix),
+        output_prefix=item_prefix,
+        run=run_identity(),
+        source=source_identity(),
+        image_digest_sha256="e" * 64,
+        artifacts=[ArtifactPayload("masks/combined_mask.png", b"mask", "image/png")],
+    )
+    output = OutputManifest(
+        schema_version=1,
+        job_id="wm_123",
+        tenant_id="tenant_17",
+        pipeline_version="watermark-v1",
+        worker_image_digest="local:test-worker",
+        config_sha256=SHA_A,
+        model_manifest_sha256=SHA_B,
+        manifest=run_identity().manifest,
+        counts=OutputManifestCounts(total=1, succeeded=0, failed=0, blocked=1, skipped=0),
+        items=[
+            OutputManifestEntry(
+                item_id="asset_123",
+                status=ItemStatus.BLOCKED_BY_SAFETY_GATE,
+                decision=Decision.BLOCKED,
+                result=item.marker.result,
+                marker=item.marker_ref,
+            )
+        ],
+        completed_at=datetime.now(UTC),
+    )
+    writer.write_job(output_manifest=output, output_prefix="tenant_17/wm_123/", run=run_identity())
+
+    replay = writer.write_job(
+        output_manifest=output.model_copy(update={"completed_at": datetime.now(UTC)}),
+        output_prefix="tenant_17/wm_123/",
+        run=run_identity(),
+    )
+
+    assert replay.reused is True

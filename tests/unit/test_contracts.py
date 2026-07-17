@@ -15,7 +15,6 @@ from watermark_worker.contracts import (
     exit_code_for_error,
 )
 
-
 SHA = "a" * 64
 
 
@@ -156,4 +155,3 @@ def test_error_codes_map_to_documented_process_exit_codes(
     error: ErrorCode, expected: ExitCode
 ) -> None:
     assert exit_code_for_error(error) is expected
-

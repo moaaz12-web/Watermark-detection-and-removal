@@ -608,7 +608,7 @@ Cancellation is asynchronous:
 4. Reconcile until provider work is stopped.
 5. Mark `CANCELLED` and set `completed_at`.
 
-The GPU worker should handle `SIGTERM` by completing or recording a safe item checkpoint when the shutdown window permits. Already-uploaded compatible `_SUCCESS.json` markers remain reusable for an explicitly created retry job if product policy allows it.
+The GPU worker should handle `SIGTERM` by completing or recording a safe item checkpoint when the shutdown window permits. Already-uploaded compatible `_COMPLETE.json` markers remain reusable for an explicitly created retry job if product policy allows it.
 
 ## 17. Retry policy
 

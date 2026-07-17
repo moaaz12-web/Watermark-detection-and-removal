@@ -9,7 +9,6 @@ from watermark_worker.contracts import InputManifest
 from watermark_worker.errors import InvalidManifestError
 from watermark_worker.manifest import validate_manifest
 
-
 SHA = "a" * 64
 
 

@@ -247,6 +247,30 @@ python -m watermark_worker \
 }
 ```
 
+For local development, version 1 uses the explicit `inputPath` variant rather than `file://` in
+the manifest. `inputPath` is a safe relative path resolved from the local manifest's directory;
+`inputGeneration` is forbidden; and `outputPrefix` is the relative, deterministic key
+`<tenantId>/<jobId>/<itemId>/`. The worker may use `file://` URIs internally after resolution,
+but those are not part of the local manifest schema.
+
+```json
+{
+  "schemaVersion": 1,
+  "jobId": "wm_123",
+  "tenantId": "tenant_17",
+  "pipelineVersion": "watermark-v1",
+  "createdAt": "2026-07-17T10:00:00Z",
+  "items": [
+    {
+      "itemId": "asset_123",
+      "inputPath": "inputs/asset_123.png",
+      "outputPrefix": "tenant_17/wm_123/asset_123/",
+      "sourceChecksumSha256": "required-lowercase-64-character-hex-value"
+    }
+  ]
+}
+```
+
 ### 7.3 Validation rules
 
 - `schemaVersion` must be supported.
@@ -662,6 +686,18 @@ Acceptance:
 Verify:
 
 - GPU smoke test proves sequential model lifecycle, reports device metadata, and records peak resource use.
+
+### Current foundation status (W2/W3)
+
+- W2 implements the typed contracts, local/GCS CLI validation, local `inputPath` contract,
+  decoded-image limits, conditional result and `_COMPLETE.json` creation, and structured JSON
+  logging. The tested `--validate-only` local path writes terminal `UNVERIFIED` results with no
+  `finalUri`; it intentionally does not load models or run inference.
+- W3 implements a model-artifact cache and stage lifecycle abstraction. It reads every configured
+  artifact only at its pinned GCS generation, verifies size and SHA-256 before caching it, records
+  immutable cache metadata, and permits each stage to initialize once before release. No production
+  loader factory, model object, GPU smoke test, or Batch run exists until W1 supplies approved
+  artifact locations, checksums, source revisions, and licenses.
 
 ### W4. Extract one complete local pipeline path
 

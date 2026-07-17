@@ -4,9 +4,10 @@ import hashlib
 import json
 import mimetypes
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 from urllib.parse import unquote, urlparse
 
 from google.api_core import exceptions as google_exceptions
@@ -116,7 +117,9 @@ class LocalStorageAdapter:
                     raise ValueError("invalid user metadata")
                 metadata = user_metadata
             except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-                raise PermanentStorageError(f"invalid local metadata sidecar for {uri}: {exc}") from exc
+                raise PermanentStorageError(
+                    f"invalid local metadata sidecar for {uri}: {exc}"
+                ) from exc
 
         return StoredObject(
             ref=ObjectRef(
@@ -290,7 +293,9 @@ class GcsStorageAdapter:
             raise _translate_gcs_error(exc, operation=f"create {uri}") from exc
 
 
-def _translate_gcs_error(exc: Exception, *, operation: str) -> PermanentStorageError | RetryableStorageError:
+def _translate_gcs_error(
+    exc: Exception, *, operation: str
+) -> PermanentStorageError | RetryableStorageError:
     if isinstance(exc, google_exceptions.PreconditionFailed):
         return ConditionalWriteCollision(f"conditional GCS create collided during {operation}")
     if isinstance(exc, google_exceptions.NotFound):

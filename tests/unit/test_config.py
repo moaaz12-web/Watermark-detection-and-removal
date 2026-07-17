@@ -7,8 +7,11 @@ import pytest
 
 from watermark_worker.config import load_pipeline_config
 from watermark_worker.errors import InvalidConfigurationError, ModelValidationError
-from watermark_worker.model_registry import load_model_manifest, validate_model_bindings
-
+from watermark_worker.model_registry import (
+    load_model_manifest,
+    selected_stage_definitions,
+    validate_model_bindings,
+)
 
 SHA_A = "a" * 64
 
@@ -181,3 +184,26 @@ def test_duplicate_model_artifact_id_is_rejected(tmp_path) -> None:
 
     with pytest.raises(ModelValidationError, match="duplicate artifactId"):
         load_model_manifest(path)
+
+
+def test_model_manifest_rejects_unsafe_cache_filename(tmp_path) -> None:
+    payload = model_payload()
+    payload["artifacts"][0]["filename"] = "../rmbg.bin"  # type: ignore[index]
+    path = tmp_path / "model-manifest.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ModelValidationError, match="safe filename"):
+        load_model_manifest(path)
+
+
+def test_selected_stage_definitions_contain_only_enabled_model_artifacts(tmp_path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps(config_payload()), encoding="utf-8")
+
+    definitions = selected_stage_definitions(load_pipeline_config(path).config)
+
+    assert [(definition.name, definition.artifact_ids) for definition in definitions] == [
+        ("background_removal", (f"rmbg-{SHA_A}",)),
+        ("detection_segmentation", (f"sam-{SHA_A}", f"yolo-{SHA_A}", f"dino-{SHA_A}")),
+        ("inpainting", (f"lama-{SHA_A}",)),
+    ]
