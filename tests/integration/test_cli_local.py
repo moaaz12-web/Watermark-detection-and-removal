@@ -2,13 +2,136 @@ from __future__ import annotations
 
 import hashlib
 import json
+from io import BytesIO
 from pathlib import Path
 
 from PIL import Image
 
 from watermark_worker.cli import entrypoint
+from watermark_worker.config import load_pipeline_config
+from watermark_worker.pipeline import (
+    BackgroundRemovalOutput,
+    DetectionOutput,
+    InpaintingOutput,
+    PipelineExecutor,
+    StageArtifact,
+)
+from watermark_worker.stages.safety_gate import BinaryMask
 
 SHA_A = "a" * 64
+
+
+def png_bytes(image: Image.Image) -> bytes:
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+class ReferenceBackgroundStage:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.closed = 0
+
+    def run(self, source: Image.Image) -> BackgroundRemovalOutput:
+        self.calls += 1
+        width, height = source.size
+        foreground = BinaryMask(
+            width=width,
+            height=height,
+            pixels=frozenset((x, y) for y in range(height) for x in range(width)),
+        )
+        detector_image = Image.new("RGB", source.size, "white")
+        return BackgroundRemovalOutput(
+            detector_image=detector_image,
+            foreground_mask=foreground,
+            artifacts=(
+                StageArtifact(
+                    "background_removed/foreground_mask.png",
+                    foreground.to_png_bytes(),
+                    "image/png",
+                ),
+                StageArtifact(
+                    "background_removed/white_background.png",
+                    png_bytes(detector_image),
+                    "image/png",
+                ),
+            ),
+        )
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class ReferenceDetectionStage:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.closed = 0
+
+    def run(self, detector_image: Image.Image) -> DetectionOutput:
+        self.calls += 1
+        width, height = detector_image.size
+        detected = BinaryMask(
+            width=width,
+            height=height,
+            pixels=frozenset({(width - 1, height - 1)}),
+        )
+        return DetectionOutput(
+            detection_masks=(detected,),
+            artifacts=(
+                StageArtifact(
+                    "detections/detector_results.json",
+                    b'{"detections":[{"id":"reference"}]}',
+                    "application/json",
+                ),
+                StageArtifact(
+                    "detections/annotated.png",
+                    png_bytes(detector_image),
+                    "image/png",
+                ),
+                StageArtifact("masks/mask_000.png", detected.to_png_bytes(), "image/png"),
+            ),
+        )
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class ReferenceInpaintingStage:
+    def __init__(self) -> None:
+        self.calls = 0
+        self.closed = 0
+
+    def run(self, source: Image.Image, approved_mask: BinaryMask) -> InpaintingOutput:
+        self.calls += 1
+        final = source.convert("RGB")
+        for pixel in approved_mask.pixels:
+            final.putpixel(pixel, (0, 255, 0))
+        return InpaintingOutput(final_image=final, artifacts=())
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def reference_executor(config_path: Path) -> tuple[
+    PipelineExecutor,
+    ReferenceBackgroundStage,
+    ReferenceDetectionStage,
+    ReferenceInpaintingStage,
+]:
+    background = ReferenceBackgroundStage()
+    detection = ReferenceDetectionStage()
+    inpainting = ReferenceInpaintingStage()
+    return (
+        PipelineExecutor(
+            background_removal=background,
+            detection=detection,
+            inpainting=inpainting,
+            safety_gate=load_pipeline_config(config_path).config.safety_gate,
+        ),
+        background,
+        detection,
+        inpainting,
+    )
 
 
 def write_worker_material(tmp_path: Path) -> tuple[Path, Path]:
@@ -172,6 +295,80 @@ def test_local_validate_only_writes_terminal_results_without_final_uri(tmp_path:
         )
         == 0
     )
+
+
+def test_local_reference_inference_writes_the_documented_artifact_contract(
+    tmp_path: Path,
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    image_path = inputs / "asset_123.png"
+    Image.new("RGB", (4, 4), "blue").save(image_path)
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "jobId": "wm_123",
+                "tenantId": "tenant_17",
+                "pipelineVersion": "watermark-v1",
+                "createdAt": "2026-07-17T10:00:00Z",
+                "items": [
+                    {
+                        "itemId": "asset_123",
+                        "inputPath": "inputs/asset_123.png",
+                        "outputPrefix": "tenant_17/wm_123/asset_123/",
+                        "sourceChecksumSha256": hashlib.sha256(
+                            image_path.read_bytes()
+                        ).hexdigest(),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_root = tmp_path / "output"
+    executor, background, detection, inpainting = reference_executor(config_path)
+
+    exit_code = entrypoint(
+        [
+            "--manifest-path",
+            str(manifest_path),
+            "--local-output-root",
+            str(output_root),
+            "--config",
+            str(config_path),
+            "--model-manifest",
+            str(model_manifest_path),
+            "--worker-image-digest",
+            "local:reference-test",
+        ],
+        executor=executor,
+    )
+
+    assert exit_code == 0
+    item_root = output_root / "tenant_17/wm_123/asset_123"
+    expected = {
+        "source_metadata.json",
+        "background_removed/foreground_mask.png",
+        "background_removed/white_background.png",
+        "detections/detector_results.json",
+        "detections/annotated.png",
+        "masks/mask_000.png",
+        "masks/combined_mask.png",
+        "inpainted/final.png",
+        "result.json",
+        "_COMPLETE.json",
+    }
+    assert all((item_root / relative_name).is_file() for relative_name in expected)
+    result = json.loads((item_root / "result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "SUCCEEDED"
+    assert result["decision"] == "INPAINTED"
+    assert result["finalUri"].endswith("/inpainted/final.png")
+    assert result["combinedMaskUri"].endswith("/masks/combined_mask.png")
+    assert background.calls == detection.calls == inpainting.calls == 1
+    assert background.closed == detection.closed == inpainting.closed == 1
 
 
 def test_cli_rejects_gcs_execution_without_pinned_manifest_generation(tmp_path: Path) -> None:

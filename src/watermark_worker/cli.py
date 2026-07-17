@@ -20,6 +20,7 @@ from watermark_worker.contracts import (
     InputManifest,
     ItemResult,
     ItemStatus,
+    ManifestItem,
     ObjectRef,
     OutputManifest,
     OutputManifestCounts,
@@ -35,6 +36,7 @@ from watermark_worker.errors import (
 )
 from watermark_worker.manifest import validate_manifest
 from watermark_worker.model_registry import load_model_manifest, validate_model_bindings
+from watermark_worker.pipeline import PipelineExecutor, PipelineItem, PipelineOutcome
 from watermark_worker.progress import emit_event
 from watermark_worker.result_writer import ArtifactPayload, ResultWriter, RunIdentity
 from watermark_worker.storage import (
@@ -64,6 +66,16 @@ class DecodedImage:
     image_format: str
     width: int
     height: int
+
+
+@dataclass(frozen=True)
+class PreparedInferenceItem:
+    manifest_item: ManifestItem
+    source: InputIdentity
+    source_data: bytes
+    decoded: DecodedImage
+    image: Image.Image
+    started_at: float
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -118,10 +130,14 @@ def parse_arguments(argv: list[str] | None = None) -> CliArguments:
     )
 
 
-def entrypoint(argv: list[str] | None = None) -> int:
+def entrypoint(
+    argv: list[str] | None = None,
+    *,
+    executor: PipelineExecutor | None = None,
+) -> int:
     try:
         arguments = parse_arguments(argv)
-        return run(arguments)
+        return run(arguments, executor=executor)
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else 2
     except WorkerError as exc:
@@ -132,8 +148,8 @@ def entrypoint(argv: list[str] | None = None) -> int:
         return 10
 
 
-def run(arguments: CliArguments) -> int:
-    if not arguments.validate_only:
+def run(arguments: CliArguments, *, executor: PipelineExecutor | None = None) -> int:
+    if not arguments.validate_only and executor is None:
         raise InvalidCliError(
             "real GPU inference is unavailable until W1 model artifacts are approved"
         )
@@ -163,80 +179,185 @@ def run(arguments: CliArguments) -> int:
         manifest=manifest_identity,
     )
     writer = ResultWriter(storage)
-    entries: list[OutputManifestEntry] = []
+    entries: dict[str, OutputManifestEntry] = {}
     counts = {status: 0 for status in ItemStatus}
     emit_event(
         "job_started",
         jobId=manifest.job_id,
         pipelineVersion=manifest.pipeline_version,
         mode=manifest.storage_mode,
-        validateOnly=True,
+        validateOnly=arguments.validate_only,
     )
-    for item in manifest.items:
-        started = time.monotonic()
-        source_uri = (
-            _source_uri(item.input_path, arguments.manifest_path)
-            if item.input_path
-            else item.input_uri
-        )
-        if source_uri is None:
-            raise InvalidManifestError(f"item {item.item_id} has no source URI")
-        source = storage.read_bytes(source_uri, generation=item.input_generation)
-        verify_sha256(
-            source.data,
-            item.source_checksum_sha256,
-            identity=f"item {item.item_id} source",
-        )
-        source_identity = InputIdentity(
-            uri=source_uri,
-            generation=source.ref.generation if manifest.storage_mode is StorageMode.GCS else None,
-            checksum_sha256=item.source_checksum_sha256,
-        )
-        try:
-            decoded = validate_image(source.data, loaded_config.config.limits)
-            result, artifacts = _validate_only_result(
-                item_id=item.item_id,
-                source=source_identity,
-                source_data=source.data,
-                decoded=decoded,
-                run=run_identity,
-                processing_seconds=time.monotonic() - started,
-            )
-        except ImageValidationError as exc:
-            result = _failed_image_result(
-                item_id=item.item_id,
-                source=source_identity,
-                run=run_identity,
-                error_code=exc.error_code,
-                processing_seconds=time.monotonic() - started,
-            )
-            artifacts = []
-        outcome = writer.write_item(
-            result=result,
-            output_prefix=item.output_prefix,
-            run=run_identity,
-            source=source_identity,
-            image_digest_sha256=sha256_bytes(source.data),
-            artifacts=artifacts,
-        )
+
+    def record_item(
+        *,
+        result: ItemResult,
+        entry: OutputManifestEntry,
+        reused: bool,
+    ) -> None:
+        if result.item_id in entries:
+            raise RuntimeError(f"item {result.item_id} produced more than one output entry")
         counts[result.status] += 1
-        entries.append(
-            OutputManifestEntry(
-                item_id=item.item_id,
-                status=result.status,
-                decision=result.decision,
-                result=outcome.marker.result,
-                marker=outcome.marker_ref,
-            )
-        )
+        entries[result.item_id] = entry
         emit_event(
             "item_completed",
             jobId=manifest.job_id,
-            itemId=item.item_id,
+            itemId=result.item_id,
             status=result.status,
             decision=result.decision,
-            reused=outcome.reused,
+            reused=reused,
         )
+
+    if arguments.validate_only:
+        for item in manifest.items:
+            started = time.monotonic()
+            source, source_identity = _read_item_source(
+                item=item,
+                manifest=manifest,
+                arguments=arguments,
+                storage=storage,
+            )
+            try:
+                decoded = validate_image(source.data, loaded_config.config.limits)
+                result, artifacts = _validate_only_result(
+                    item_id=item.item_id,
+                    source=source_identity,
+                    source_data=source.data,
+                    decoded=decoded,
+                    run=run_identity,
+                    processing_seconds=time.monotonic() - started,
+                )
+            except ImageValidationError as exc:
+                result = _failed_image_result(
+                    item_id=item.item_id,
+                    source=source_identity,
+                    run=run_identity,
+                    error_code=exc.error_code,
+                    processing_seconds=time.monotonic() - started,
+                )
+                artifacts = []
+            written = writer.write_item(
+                result=result,
+                output_prefix=item.output_prefix,
+                run=run_identity,
+                source=source_identity,
+                image_digest_sha256=sha256_bytes(source.data),
+                artifacts=artifacts,
+            )
+            record_item(
+                result=result,
+                entry=OutputManifestEntry(
+                    item_id=item.item_id,
+                    status=result.status,
+                    decision=result.decision,
+                    result=written.marker.result,
+                    marker=written.marker_ref,
+                ),
+                reused=written.reused,
+            )
+    else:
+        assert executor is not None
+        prepared: dict[str, PreparedInferenceItem] = {}
+        pending: list[PipelineItem] = []
+        for item in manifest.items:
+            started = time.monotonic()
+            source, source_identity = _read_item_source(
+                item=item,
+                manifest=manifest,
+                arguments=arguments,
+                storage=storage,
+            )
+            image_digest = sha256_bytes(source.data)
+            completed = writer.read_completed_item(
+                item_id=item.item_id,
+                output_prefix=item.output_prefix,
+                run=run_identity,
+                source=source_identity,
+                image_digest_sha256=image_digest,
+            )
+            if completed is not None:
+                record_item(
+                    result=completed.result,
+                    entry=completed.output_entry,
+                    reused=True,
+                )
+                continue
+            try:
+                decoded, image = decode_image(source.data, loaded_config.config.limits)
+            except ImageValidationError as exc:
+                result = _failed_image_result(
+                    item_id=item.item_id,
+                    source=source_identity,
+                    run=run_identity,
+                    error_code=exc.error_code,
+                    processing_seconds=time.monotonic() - started,
+                )
+                written = writer.write_item(
+                    result=result,
+                    output_prefix=item.output_prefix,
+                    run=run_identity,
+                    source=source_identity,
+                    image_digest_sha256=image_digest,
+                    artifacts=[],
+                )
+                record_item(
+                    result=result,
+                    entry=OutputManifestEntry(
+                        item_id=item.item_id,
+                        status=result.status,
+                        decision=result.decision,
+                        result=written.marker.result,
+                        marker=written.marker_ref,
+                    ),
+                    reused=written.reused,
+                )
+                continue
+            prepared[item.item_id] = PreparedInferenceItem(
+                manifest_item=item,
+                source=source_identity,
+                source_data=source.data,
+                decoded=decoded,
+                image=image,
+                started_at=started,
+            )
+            pending.append(PipelineItem(item_id=item.item_id, source_image=image))
+
+        def checkpoint(outcome: PipelineOutcome) -> None:
+            context = prepared[outcome.item_id]
+            result, artifacts = _inference_result(
+                outcome=outcome,
+                context=context,
+                run=run_identity,
+                writer=writer,
+                processing_seconds=time.monotonic() - context.started_at,
+            )
+            written = writer.write_item(
+                result=result,
+                output_prefix=context.manifest_item.output_prefix,
+                run=run_identity,
+                source=context.source,
+                image_digest_sha256=sha256_bytes(context.source_data),
+                artifacts=artifacts,
+            )
+            record_item(
+                result=result,
+                entry=OutputManifestEntry(
+                    item_id=result.item_id,
+                    status=result.status,
+                    decision=result.decision,
+                    result=written.marker.result,
+                    marker=written.marker_ref,
+                ),
+                reused=written.reused,
+            )
+
+        try:
+            if pending:
+                executor.process(pending, on_terminal=checkpoint)
+        finally:
+            for context in prepared.values():
+                context.image.close()
+
     output_manifest = OutputManifest(
         schema_version=1,
         job_id=manifest.job_id,
@@ -253,7 +374,7 @@ def run(arguments: CliArguments) -> int:
             blocked=counts[ItemStatus.BLOCKED_BY_SAFETY_GATE],
             skipped=counts[ItemStatus.SKIPPED_NO_WATERMARK],
         ),
-        items=entries,
+        items=[entries[item.item_id] for item in manifest.items],
         completed_at=datetime.now(UTC),
     )
     job = writer.write_job(
@@ -329,13 +450,40 @@ def _source_uri(input_path: str | None, manifest_path: Path | None) -> str:
     return source.as_uri()
 
 
+def _read_item_source(
+    *,
+    item: ManifestItem,
+    manifest: InputManifest,
+    arguments: CliArguments,
+    storage: StorageAdapter,
+) -> tuple[StoredObject, InputIdentity]:
+    source_uri = (
+        _source_uri(item.input_path, arguments.manifest_path)
+        if item.input_path
+        else item.input_uri
+    )
+    if source_uri is None:
+        raise InvalidManifestError(f"item {item.item_id} has no source URI")
+    source = storage.read_bytes(source_uri, generation=item.input_generation)
+    verify_sha256(
+        source.data,
+        item.source_checksum_sha256,
+        identity=f"item {item.item_id} source",
+    )
+    return source, InputIdentity(
+        uri=source_uri,
+        generation=source.ref.generation if manifest.storage_mode is StorageMode.GCS else None,
+        checksum_sha256=item.source_checksum_sha256,
+    )
+
+
 class ImageValidationError(Exception):
     def __init__(self, error_code: ErrorCode, message: str) -> None:
         super().__init__(message)
         self.error_code = error_code
 
 
-def validate_image(data: bytes, limits: ImageLimits) -> DecodedImage:
+def decode_image(data: bytes, limits: ImageLimits) -> tuple[DecodedImage, Image.Image]:
     if len(data) > limits.maximum_compressed_bytes:
         raise ImageValidationError(
             ErrorCode.IMAGE_LIMIT_EXCEEDED,
@@ -347,6 +495,7 @@ def validate_image(data: bytes, limits: ImageLimits) -> DecodedImage:
             with Image.open(BytesIO(data)) as image:
                 image.load()
                 normalized = ImageOps.exif_transpose(image)
+                normalized.load()
                 width, height = normalized.size
                 image_format = (image.format or "").upper()
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
@@ -369,18 +518,21 @@ def validate_image(data: bytes, limits: ImageLimits) -> DecodedImage:
         raise ImageValidationError(
             ErrorCode.IMAGE_LIMIT_EXCEEDED, "image pixel count exceeds configured limit"
         )
-    return DecodedImage(image_format=image_format, width=width, height=height)
+    return (
+        DecodedImage(image_format=image_format, width=width, height=height),
+        normalized.copy(),
+    )
 
 
-def _validate_only_result(
-    *,
-    item_id: str,
-    source: InputIdentity,
-    source_data: bytes,
-    decoded: DecodedImage,
-    run: RunIdentity,
-    processing_seconds: float,
-) -> tuple[ItemResult, list[ArtifactPayload]]:
+def validate_image(data: bytes, limits: ImageLimits) -> DecodedImage:
+    decoded, image = decode_image(data, limits)
+    image.close()
+    return decoded
+
+
+def _source_metadata_artifact(
+    *, source: InputIdentity, source_data: bytes, decoded: DecodedImage
+) -> ArtifactPayload:
     metadata = json.dumps(
         {
             "sourceUri": source.uri,
@@ -394,6 +546,98 @@ def _validate_only_result(
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+    return ArtifactPayload("source_metadata.json", metadata, "application/json")
+
+
+def _png_bytes(image: Image.Image) -> bytes:
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _inference_result(
+    *,
+    outcome: PipelineOutcome,
+    context: PreparedInferenceItem,
+    run: RunIdentity,
+    writer: ResultWriter,
+    processing_seconds: float,
+) -> tuple[ItemResult, list[ArtifactPayload]]:
+    artifacts = [
+        _source_metadata_artifact(
+            source=context.source,
+            source_data=context.source_data,
+            decoded=context.decoded,
+        ),
+        *[
+            ArtifactPayload(
+                relative_name=artifact.relative_name,
+                data=artifact.data,
+                content_type=artifact.content_type,
+            )
+            for artifact in outcome.artifacts
+        ],
+    ]
+    if outcome.final_image is not None:
+        artifacts.append(
+            ArtifactPayload(
+                relative_name="inpainted/final.png",
+                data=_png_bytes(outcome.final_image),
+                content_type="image/png",
+            )
+        )
+    names = [artifact.relative_name for artifact in artifacts]
+    if len(names) != len(set(names)):
+        raise RuntimeError(f"item {outcome.item_id} produced duplicate artifact names")
+    final_uri = (
+        writer.artifact_uri(context.manifest_item.output_prefix, "inpainted/final.png")
+        if outcome.final_image is not None
+        else None
+    )
+    combined_mask_uri = (
+        writer.artifact_uri(context.manifest_item.output_prefix, "masks/combined_mask.png")
+        if "masks/combined_mask.png" in names
+        else None
+    )
+    return (
+        ItemResult(
+            schema_version=1,
+            job_id=run.job_id,
+            item_id=outcome.item_id,
+            status=outcome.status,
+            pipeline_version=run.pipeline_version,
+            worker_image_digest=run.worker_image_digest,
+            config_sha256=run.config_sha256,
+            model_manifest_sha256=run.model_manifest_sha256,
+            source_uri=context.source.uri,
+            source_generation=context.source.generation,
+            source_checksum_sha256=context.source.checksum_sha256,
+            final_uri=final_uri,
+            combined_mask_uri=combined_mask_uri,
+            detection_count=outcome.detection_count,
+            decision=outcome.decision,
+            warning_codes=outcome.warning_codes,
+            error_code=(
+                outcome.error_code or ErrorCode.UNEXPECTED_FATAL
+                if outcome.status is ItemStatus.FAILED
+                else None
+            ),
+            processing_seconds=processing_seconds,
+            completed_at=datetime.now(UTC),
+        ),
+        artifacts,
+    )
+
+
+def _validate_only_result(
+    *,
+    item_id: str,
+    source: InputIdentity,
+    source_data: bytes,
+    decoded: DecodedImage,
+    run: RunIdentity,
+    processing_seconds: float,
+) -> tuple[ItemResult, list[ArtifactPayload]]:
     return (
         ItemResult(
             schema_version=1,
@@ -413,7 +657,13 @@ def _validate_only_result(
             processing_seconds=processing_seconds,
             completed_at=datetime.now(UTC),
         ),
-        [ArtifactPayload("source_metadata.json", metadata, "application/json")],
+        [
+            _source_metadata_artifact(
+                source=source,
+                source_data=source_data,
+                decoded=decoded,
+            )
+        ],
     )
 
 
