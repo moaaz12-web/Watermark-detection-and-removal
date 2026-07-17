@@ -133,6 +133,76 @@ def test_compatible_item_replay_validates_and_reuses_without_writes(tmp_path: Pa
     assert storage.created == []
 
 
+def test_completed_item_probe_returns_validated_output_entry_without_writes(
+    tmp_path: Path,
+) -> None:
+    storage = RecordingLocalStorage(tmp_path)
+    writer = ResultWriter(storage)
+    prefix = "tenant_17/wm_123/asset_123/"
+    writer.write_item(
+        result=blocked_result(writer, prefix),
+        output_prefix=prefix,
+        run=run_identity(),
+        source=source_identity(),
+        image_digest_sha256="e" * 64,
+        artifacts=[ArtifactPayload("masks/combined_mask.png", b"mask", "image/png")],
+    )
+    storage.created.clear()
+
+    completed = writer.read_completed_item(
+        item_id="asset_123",
+        output_prefix=prefix,
+        run=run_identity(),
+        source=source_identity(),
+        image_digest_sha256="e" * 64,
+    )
+
+    assert completed is not None
+    assert completed.result.decision is Decision.BLOCKED
+    assert completed.output_entry.item_id == "asset_123"
+    assert completed.output_entry.result == completed.marker.result
+    assert storage.created == []
+
+
+def test_completed_item_probe_returns_none_when_marker_is_missing(tmp_path: Path) -> None:
+    writer = ResultWriter(LocalStorageAdapter(tmp_path))
+
+    completed = writer.read_completed_item(
+        item_id="asset_123",
+        output_prefix="tenant_17/wm_123/asset_123/",
+        run=run_identity(),
+        source=source_identity(),
+        image_digest_sha256="e" * 64,
+    )
+
+    assert completed is None
+
+
+def test_completed_item_probe_rejects_a_changed_artifact(tmp_path: Path) -> None:
+    storage = LocalStorageAdapter(tmp_path)
+    writer = ResultWriter(storage)
+    prefix = "tenant_17/wm_123/asset_123/"
+    writer.write_item(
+        result=blocked_result(writer, prefix),
+        output_prefix=prefix,
+        run=run_identity(),
+        source=source_identity(),
+        image_digest_sha256="e" * 64,
+        artifacts=[ArtifactPayload("masks/combined_mask.png", b"mask", "image/png")],
+    )
+    artifact_path = tmp_path / "tenant_17/wm_123/asset_123/masks/combined_mask.png"
+    artifact_path.write_bytes(b"changed")
+
+    with pytest.raises(StaleOutputError, match=r"artifact masks/combined_mask\.png changed"):
+        writer.read_completed_item(
+            item_id="asset_123",
+            output_prefix=prefix,
+            run=run_identity(),
+            source=source_identity(),
+            image_digest_sha256="e" * 64,
+        )
+
+
 def test_stale_marker_with_different_config_is_rejected(tmp_path: Path) -> None:
     storage = LocalStorageAdapter(tmp_path)
     writer = ResultWriter(storage)

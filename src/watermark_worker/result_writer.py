@@ -14,6 +14,7 @@ from watermark_worker.contracts import (
     JobCompleteMarker,
     ObjectRef,
     OutputManifest,
+    OutputManifestEntry,
 )
 from watermark_worker.errors import (
     ConditionalWriteCollision,
@@ -50,6 +51,23 @@ class ItemWriteOutcome:
 
 
 @dataclass(frozen=True)
+class CompletedItem:
+    result: ItemResult
+    marker: ItemCompleteMarker
+    marker_ref: ObjectRef
+
+    @property
+    def output_entry(self) -> OutputManifestEntry:
+        return OutputManifestEntry(
+            item_id=self.result.item_id,
+            status=self.result.status,
+            decision=self.result.decision,
+            result=self.marker.result,
+            marker=self.marker_ref,
+        )
+
+
+@dataclass(frozen=True)
 class JobWriteOutcome:
     marker: JobCompleteMarker
     marker_ref: ObjectRef
@@ -65,6 +83,87 @@ class ResultWriter:
 
     def artifact_uri(self, output_prefix: str, relative_name: str) -> str:
         return self.storage.join_uri(output_prefix, relative_name)
+
+    def read_completed_item(
+        self,
+        *,
+        item_id: str,
+        output_prefix: str,
+        run: RunIdentity,
+        source: InputIdentity,
+        image_digest_sha256: str,
+    ) -> CompletedItem | None:
+        marker_uri = self.artifact_uri(output_prefix, "_COMPLETE.json")
+        existing_marker = self._read_item_marker(marker_uri)
+        if existing_marker is None:
+            return None
+        marker, marker_ref = existing_marker
+        self._validate_item_marker_identity(
+            marker=marker,
+            item_id=item_id,
+            run=run,
+            source=source,
+            image_digest_sha256=image_digest_sha256,
+        )
+        if marker_ref.uri != marker_uri:
+            raise StaleOutputError("existing item marker URI is incompatible")
+        marker_object = self._read_required(marker_uri, "item completion marker")
+        if marker_object.ref != marker_ref:
+            raise StaleOutputError("item completion marker object identity changed")
+        self._validate_existing_object(
+            marker_object,
+            expected_data=_canonical_json(marker),
+            expected_metadata={
+                **self._identity_metadata(run=run, source=source),
+                "wmObjectKind": "item-complete",
+            },
+            identity="item completion marker",
+        )
+
+        expected_result_uri = self.artifact_uri(output_prefix, "result.json")
+        if marker.result.uri != expected_result_uri:
+            raise StaleOutputError("existing result URI is outside the item output prefix")
+        result_object = self._read_required(marker.result.uri, "result")
+        if result_object.ref != marker.result:
+            raise StaleOutputError("result object identity changed")
+        try:
+            result = ItemResult.model_validate_json(result_object.data)
+        except ValidationError as exc:
+            raise StaleOutputError(f"invalid existing result JSON: {exc}") from exc
+        if result.item_id != item_id:
+            raise StaleOutputError("existing result has incompatible item_id")
+        self._validate_item_request(result=result, run=run, source=source)
+        self._validate_existing_metadata(
+            result_object,
+            expected_metadata={
+                **self._identity_metadata(run=run, source=source),
+                "wmObjectKind": "result",
+            },
+            identity="result",
+        )
+
+        for name, ref in marker.artifacts.items():
+            if ref.uri != self.artifact_uri(output_prefix, name):
+                raise StaleOutputError(f"artifact {name} URI is outside the item output prefix")
+            stored = self._read_required(ref.uri, f"artifact {name}")
+            if stored.ref != ref:
+                raise StaleOutputError(f"artifact {name} changed")
+            self._validate_existing_metadata(
+                stored,
+                expected_metadata={
+                    **self._identity_metadata(run=run, source=source),
+                    "wmObjectKind": "artifact",
+                    "wmArtifactName": name,
+                },
+                identity=f"artifact {name}",
+            )
+        self._validate_result_artifact_link(
+            result.final_uri, "inpainted/final.png", marker.artifacts
+        )
+        self._validate_result_artifact_link(
+            result.combined_mask_uri, "masks/combined_mask.png", marker.artifacts
+        )
+        return CompletedItem(result=result, marker=marker, marker_ref=marker_ref)
 
     def write_item(
         self,
@@ -326,20 +425,13 @@ class ResultWriter:
         artifacts: list[ArtifactPayload],
         output_prefix: str,
     ) -> None:
-        expected = {
-            "job_id": run.job_id,
-            "item_id": result.item_id,
-            "pipeline_version": run.pipeline_version,
-            "worker_image_digest": run.worker_image_digest,
-            "config_sha256": run.config_sha256,
-            "model_manifest_sha256": run.model_manifest_sha256,
-            "manifest": run.manifest,
-            "source": source,
-            "image_digest_sha256": image_digest_sha256,
-        }
-        for field, value in expected.items():
-            if getattr(marker, field) != value:
-                raise StaleOutputError(f"existing item marker has incompatible {field}")
+        self._validate_item_marker_identity(
+            marker=marker,
+            item_id=result.item_id,
+            run=run,
+            source=source,
+            image_digest_sha256=image_digest_sha256,
+        )
         marker_object = self._read_required(marker_ref.uri, "item completion marker")
         if marker_object.ref != marker_ref:
             raise StaleOutputError("item completion marker object identity changed")
@@ -388,6 +480,44 @@ class ResultWriter:
         expected_marker_uri = self.artifact_uri(output_prefix, "_COMPLETE.json")
         if marker_ref.uri != expected_marker_uri:
             raise StaleOutputError("existing item marker URI is incompatible")
+
+    @staticmethod
+    def _validate_item_marker_identity(
+        *,
+        marker: ItemCompleteMarker,
+        item_id: str,
+        run: RunIdentity,
+        source: InputIdentity,
+        image_digest_sha256: str,
+    ) -> None:
+        expected = {
+            "job_id": run.job_id,
+            "item_id": item_id,
+            "pipeline_version": run.pipeline_version,
+            "worker_image_digest": run.worker_image_digest,
+            "config_sha256": run.config_sha256,
+            "model_manifest_sha256": run.model_manifest_sha256,
+            "manifest": run.manifest,
+            "source": source,
+            "image_digest_sha256": image_digest_sha256,
+        }
+        for field, value in expected.items():
+            if getattr(marker, field) != value:
+                raise StaleOutputError(f"existing item marker has incompatible {field}")
+
+    @staticmethod
+    def _validate_result_artifact_link(
+        uri: str | None,
+        relative_name: str,
+        artifacts: Mapping[str, ObjectRef],
+    ) -> None:
+        if uri is None:
+            return
+        ref = artifacts.get(relative_name)
+        if ref is None or ref.uri != uri:
+            raise StaleOutputError(
+                f"existing result references missing or incompatible artifact {relative_name}"
+            )
 
     def _validate_job_marker(
         self,
