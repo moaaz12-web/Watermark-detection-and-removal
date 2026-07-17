@@ -134,10 +134,11 @@ def entrypoint(
     argv: list[str] | None = None,
     *,
     executor: PipelineExecutor | None = None,
+    storage: StorageAdapter | None = None,
 ) -> int:
     try:
         arguments = parse_arguments(argv)
-        return run(arguments, executor=executor)
+        return run(arguments, executor=executor, storage=storage)
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else 2
     except WorkerError as exc:
@@ -148,7 +149,12 @@ def entrypoint(
         return 10
 
 
-def run(arguments: CliArguments, *, executor: PipelineExecutor | None = None) -> int:
+def run(
+    arguments: CliArguments,
+    *,
+    executor: PipelineExecutor | None = None,
+    storage: StorageAdapter | None = None,
+) -> int:
     if not arguments.validate_only and executor is None:
         raise InvalidCliError(
             "real GPU inference is unavailable until W1 model artifacts are approved"
@@ -156,7 +162,9 @@ def run(arguments: CliArguments, *, executor: PipelineExecutor | None = None) ->
     loaded_config = load_pipeline_config(arguments.config_path)
     loaded_models = load_model_manifest(arguments.model_manifest_path)
     validate_model_bindings(loaded_config.config, loaded_models.manifest)
-    storage, manifest_object, manifest_identity = _load_manifest(arguments)
+    storage, manifest_object, manifest_identity = _load_manifest(
+        arguments, storage_override=storage
+    )
     try:
         manifest = InputManifest.model_validate_json(manifest_object.data)
     except ValidationError as exc:
@@ -379,7 +387,10 @@ def run(arguments: CliArguments, *, executor: PipelineExecutor | None = None) ->
     )
     job = writer.write_job(
         output_manifest=output_manifest,
-        output_prefix=f"{manifest.tenant_id}/{manifest.job_id}/",
+        output_prefix=job_output_prefix(
+            manifest,
+            output_bucket=loaded_config.config.storage.output_bucket,
+        ),
         run=run_identity,
     )
     emit_event(
@@ -394,6 +405,8 @@ def run(arguments: CliArguments, *, executor: PipelineExecutor | None = None) ->
 
 def _load_manifest(
     arguments: CliArguments,
+    *,
+    storage_override: StorageAdapter | None = None,
 ) -> tuple[StorageAdapter, StoredObject, InputIdentity]:
     storage: StorageAdapter
     if arguments.manifest_path is not None:
@@ -421,7 +434,7 @@ def _load_manifest(
         )
     if arguments.manifest_uri is None or arguments.manifest_generation is None:
         raise InvalidCliError("GCS manifest URI and generation are required")
-    storage = GcsStorageAdapter()
+    storage = storage_override or GcsStorageAdapter()
     stored = storage.read_bytes(arguments.manifest_uri, generation=arguments.manifest_generation)
     if stored.ref.generation != arguments.manifest_generation:
         raise InvalidManifestError("GCS manifest generation did not match the pinned generation")
@@ -434,6 +447,13 @@ def _load_manifest(
             checksum_sha256=stored.ref.checksum_sha256,
         ),
     )
+
+
+def job_output_prefix(manifest: InputManifest, *, output_bucket: str) -> str:
+    relative_prefix = f"{manifest.tenant_id}/{manifest.job_id}/"
+    if manifest.storage_mode is StorageMode.GCS:
+        return f"gs://{output_bucket}/{relative_prefix}"
+    return relative_prefix
 
 
 def _source_uri(input_path: str | None, manifest_path: Path | None) -> str:
