@@ -224,11 +224,20 @@ class GcsStorageAdapter:
             bucket = self.client.bucket(location.bucket)
             requested_generation = int(generation) if generation is not None else None
             blob = bucket.blob(location.object_name, generation=requested_generation)
+            reload_options: dict[str, Any] = {"timeout": self.timeout_seconds}
+            if requested_generation is not None:
+                reload_options["if_generation_match"] = requested_generation
+            blob.reload(**reload_options)
+            if blob.generation is None:
+                raise StorageNotFoundError(f"GCS object has no generation: {uri}")
+            loaded_generation = int(blob.generation)
             if requested_generation is None:
-                blob.reload(timeout=self.timeout_seconds)
-                if blob.generation is None:
-                    raise StorageNotFoundError(f"GCS object has no generation: {uri}")
-                requested_generation = int(blob.generation)
+                requested_generation = loaded_generation
+            elif loaded_generation != requested_generation:
+                raise PermanentStorageError(
+                    f"GCS generation mismatch for {uri}: requested {requested_generation}, "
+                    f"loaded {loaded_generation}"
+                )
             data = blob.download_as_bytes(
                 if_generation_match=requested_generation,
                 timeout=self.timeout_seconds,

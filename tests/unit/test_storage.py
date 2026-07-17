@@ -63,6 +63,7 @@ class FakeBlob:
         self.metadata: dict[str, str] | None = None
         self.download_calls: list[dict[str, Any]] = []
         self.upload_calls: list[dict[str, Any]] = []
+        self.reload_calls: list[dict[str, Any]] = []
         self.data = b"source"
 
     def download_as_bytes(self, **kwargs: Any) -> bytes:
@@ -75,6 +76,7 @@ class FakeBlob:
         self.generation = 99
 
     def reload(self, **kwargs: Any) -> None:
+        self.reload_calls.append(kwargs)
         if self.generation is None:
             self.generation = 99
 
@@ -107,6 +109,29 @@ def test_gcs_read_is_pinned_to_requested_generation() -> None:
     assert blob.generation == 123
     assert blob.download_calls == [{"if_generation_match": 123, "timeout": 60.0}]
     assert stored.ref.generation == "123"
+
+
+def test_gcs_read_loads_authoritative_object_metadata() -> None:
+    client = FakeClient()
+    storage = GcsStorageAdapter(client=client)
+    bucket = client.bucket("input-bucket")
+    blob = bucket.blob("path/image.png", generation=123)
+    blob.metadata = {"wmObjectKind": "artifact"}
+    blob.content_type = "image/png"
+
+    class ExistingBlobBucket(FakeBucket):
+        def blob(self, name: str, generation: int | None = None) -> FakeBlob:
+            assert name == "path/image.png"
+            assert generation == 123
+            return blob
+
+    client.buckets["input-bucket"] = ExistingBlobBucket()
+
+    stored = storage.read_bytes("gs://input-bucket/path/image.png", generation="123")
+
+    assert blob.reload_calls == [{"if_generation_match": 123, "timeout": 60.0}]
+    assert stored.metadata == {"wmObjectKind": "artifact"}
+    assert stored.ref.content_type == "image/png"
 
 
 def test_gcs_read_rejects_a_replaced_generation(monkeypatch: pytest.MonkeyPatch) -> None:
