@@ -80,6 +80,10 @@ class FakeGcsClient:
         location = parse_gcs_uri(uri)
         return self._load(location.bucket, location.object_name, None).data
 
+    def exists(self, uri: str) -> bool:
+        location = parse_gcs_uri(uri)
+        return (location.bucket, location.object_name) in self._current
+
 
 class FakeGcsBucket:
     def __init__(self, *, client: FakeGcsClient, name: str) -> None:
