@@ -650,7 +650,7 @@ Verify:
 
 - Review the contract with the FastAPI/orchestration owner before either service is implemented.
 
-### W1. Freeze pipeline version 1
+### [ ] W1. Freeze pipeline version 1
 
 Acceptance:
 
@@ -663,7 +663,7 @@ Verify:
 
 - Record the selected notebook outputs as a reference and approve the pinned production configuration.
 
-### W2. Add contracts and local CLI shell
+### [x] W2. Add contracts and local CLI shell
 
 Acceptance:
 
@@ -675,7 +675,7 @@ Verify:
 
 - Unit tests cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched manifests.
 
-### W3. Extract model initialization
+### [ ] W3. Extract model initialization
 
 Acceptance:
 
@@ -687,17 +687,22 @@ Verify:
 
 - GPU smoke test proves sequential model lifecycle, reports device metadata, and records peak resource use.
 
-### Current foundation status (W2/W3)
+### Current status (W1-W3)
 
-- W2 implements the typed contracts, local/GCS CLI validation, local `inputPath` contract,
-  decoded-image limits, conditional result and `_COMPLETE.json` creation, and structured JSON
-  logging. The tested `--validate-only` local path writes terminal `UNVERIFIED` results with no
-  `finalUri`; it intentionally does not load models or run inference.
-- W3 implements a model-artifact cache and stage lifecycle abstraction. It reads every configured
-  artifact only at its pinned GCS generation, verifies size and SHA-256 before caching it, records
-  immutable cache metadata, and permits each stage to initialize once before release. No production
-  loader factory, model object, GPU smoke test, or Batch run exists until W1 supplies approved
-  artifact locations, checksums, source revisions, and licenses.
+- W1 remains open. The repository does not contain the approved production model-object
+  generations/checksums, source revisions and patch hashes, license/provenance approvals, or the
+  private evaluation manifest with human approvals required by its acceptance criteria.
+- W2 is complete. It implements the typed contracts, local/GCS CLI validation, local `inputPath`
+  contract, decoded-image limits, conditional result and `_COMPLETE.json` creation, and structured
+  JSON logging. The tested `--validate-only` local path writes terminal `UNVERIFIED` results with no
+  `finalUri`; it intentionally does not load models or run inference. Unit and integration tests
+  cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched
+  manifest execution.
+- W3 has a tested foundation but remains open. The model-artifact cache reads every configured
+  artifact only at its pinned GCS generation, verifies size and SHA-256 before caching it, and
+  records immutable cache metadata. The stage lifecycle permits each stage to initialize once
+  before release. No production loader factory, model object, GPU smoke test, or Batch run exists
+  until W1 supplies approved artifact locations, checksums, source revisions, and licenses.
 
 ### W4. Extract one complete local pipeline path
 

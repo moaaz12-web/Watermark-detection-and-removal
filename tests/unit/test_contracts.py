@@ -65,6 +65,14 @@ def test_local_manifest_uses_input_path_without_generation() -> None:
     assert item.input_generation is None
 
 
+def test_manifest_rejects_unsupported_schema_version() -> None:
+    payload = local_manifest_payload()
+    payload["schemaVersion"] = 2
+
+    with pytest.raises(ValidationError, match="schemaVersion"):
+        InputManifest.model_validate(payload)
+
+
 @pytest.mark.parametrize("input_path", ["/etc/passwd", "../asset.png", "inputs/../../x.png"])
 def test_local_input_path_rejects_absolute_and_parent_traversal(input_path: str) -> None:
     payload = local_manifest_payload()

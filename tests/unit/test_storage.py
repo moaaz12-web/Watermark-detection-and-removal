@@ -109,6 +109,22 @@ def test_gcs_read_is_pinned_to_requested_generation() -> None:
     assert stored.ref.generation == "123"
 
 
+def test_gcs_read_rejects_a_replaced_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_download = FakeBlob.download_as_bytes
+
+    def download_replaced_generation(blob: FakeBlob, **kwargs: Any) -> bytes:
+        data = original_download(blob, **kwargs)
+        blob.generation = 124
+        return data
+
+    monkeypatch.setattr(FakeBlob, "download_as_bytes", download_replaced_generation)
+    client = FakeClient()
+    storage = GcsStorageAdapter(client=client)
+
+    with pytest.raises(PermanentStorageError, match="generation mismatch"):
+        storage.read_bytes("gs://input-bucket/path/image.png", generation="123")
+
+
 def test_gcs_create_uses_generation_zero_precondition() -> None:
     client = FakeClient()
     storage = GcsStorageAdapter(client=client)
