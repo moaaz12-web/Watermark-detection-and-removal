@@ -32,6 +32,10 @@ packages = ["src/watermark_worker"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
+markers = [
+  "container: requires a local Docker-compatible container runtime",
+  "gcs: requires explicitly enabled Google Cloud Storage test buckets",
+]
 
 [tool.ruff]
 line-length = 100

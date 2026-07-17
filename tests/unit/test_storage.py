@@ -5,13 +5,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from google.api_core import exceptions as google_exceptions
 
 from watermark_worker.errors import (
     ConditionalWriteCollision,
     InvalidManifestError,
     PermanentStorageError,
+    RetryableStorageError,
+    StorageNotFoundError,
 )
-from watermark_worker.storage import GcsStorageAdapter, LocalStorageAdapter, verify_sha256
+from watermark_worker.storage import (
+    GcsStorageAdapter,
+    LocalStorageAdapter,
+    _translate_gcs_error,
+    verify_sha256,
+)
 
 
 def test_local_storage_creates_once_and_reads_exact_bytes(tmp_path: Path) -> None:
@@ -165,3 +173,20 @@ def test_gcs_create_uses_generation_zero_precondition() -> None:
     assert blob.upload_calls[0]["if_generation_match"] == 0
     assert blob.metadata == {"configSha256": "a" * 64}
     assert created.generation == "99"
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_type"),
+    [
+        (google_exceptions.PreconditionFailed("collision"), ConditionalWriteCollision),
+        (google_exceptions.NotFound("missing"), StorageNotFoundError),
+        (google_exceptions.Forbidden("denied"), PermanentStorageError),
+        (google_exceptions.ServiceUnavailable("retry"), RetryableStorageError),
+        (RuntimeError("unknown"), PermanentStorageError),
+    ],
+)
+def test_gcs_errors_have_stable_worker_classifications(
+    error: Exception,
+    expected_type: type[Exception],
+) -> None:
+    assert isinstance(_translate_gcs_error(error, operation="test"), expected_type)
