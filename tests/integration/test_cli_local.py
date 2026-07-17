@@ -314,6 +314,55 @@ def test_local_reference_inference_writes_the_documented_artifact_contract(
     assert background.closed == detection.closed == inpainting.closed == 1
 
 
+def test_inference_fails_closed_without_an_injected_executor(tmp_path: Path) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    manifest_path = write_local_manifest(tmp_path, item_count=1)
+    output_root = tmp_path / "output"
+
+    exit_code = entrypoint(
+        inference_arguments(
+            manifest_path=manifest_path,
+            output_root=output_root,
+            config_path=config_path,
+            model_manifest_path=model_manifest_path,
+        )
+    )
+
+    assert exit_code == 2
+    assert not (output_root / "tenant_17/wm_batch/_COMPLETE.json").exists()
+
+
+def test_unverified_reference_gate_does_not_write_a_final_artifact(tmp_path: Path) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["safety_gate"]["min_product_area_pixels"] = 17
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    manifest_path = write_local_manifest(tmp_path, item_count=1)
+    output_root = tmp_path / "output"
+    executor, background, detection, inpainting = reference_executor(config_path)
+
+    exit_code = entrypoint(
+        inference_arguments(
+            manifest_path=manifest_path,
+            output_root=output_root,
+            config_path=config_path,
+            model_manifest_path=model_manifest_path,
+        ),
+        executor=executor,
+    )
+
+    assert exit_code == 0
+    item_root = output_root / "tenant_17/wm_batch/asset_0"
+    result = json.loads((item_root / "result.json").read_text(encoding="utf-8"))
+    assert result["status"] == "BLOCKED_BY_SAFETY_GATE"
+    assert result["decision"] == "UNVERIFIED"
+    assert "finalUri" not in result
+    assert not (item_root / "inpainted/final.png").exists()
+    assert background.calls == detection.calls == 1
+    assert inpainting.calls == 0
+    assert background.closed == detection.closed == inpainting.closed == 1
+
+
 def test_reference_batch_isolates_one_corrupt_item_across_five_items(
     tmp_path: Path,
 ) -> None:
