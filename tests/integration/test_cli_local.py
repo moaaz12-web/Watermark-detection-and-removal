@@ -4,10 +4,13 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from tests.support.reference_pipeline import reference_executor
 from watermark_worker.cli import entrypoint
+from watermark_worker.errors import RetryableStorageError
+from watermark_worker.result_writer import ResultWriter
 
 SHA_A = "a" * 64
 
@@ -101,6 +104,68 @@ def write_worker_material(tmp_path: Path) -> tuple[Path, Path]:
         encoding="utf-8",
     )
     return config_path, model_manifest_path
+
+
+def write_local_manifest(
+    tmp_path: Path,
+    *,
+    item_count: int,
+    corrupt_item: int | None = None,
+) -> Path:
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    items = []
+    for index in range(item_count):
+        item_id = f"asset_{index}"
+        image_path = inputs / f"{item_id}.png"
+        if index == corrupt_item:
+            image_path.write_bytes(b"not an image")
+        else:
+            Image.new("RGB", (4, 4), (index * 20, 10, 200)).save(image_path)
+        items.append(
+            {
+                "itemId": item_id,
+                "inputPath": f"inputs/{item_id}.png",
+                "outputPrefix": f"tenant_17/wm_batch/{item_id}/",
+                "sourceChecksumSha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
+            }
+        )
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "jobId": "wm_batch",
+                "tenantId": "tenant_17",
+                "pipelineVersion": "watermark-v1",
+                "createdAt": "2026-07-17T10:00:00Z",
+                "items": items,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest_path
+
+
+def inference_arguments(
+    *,
+    manifest_path: Path,
+    output_root: Path,
+    config_path: Path,
+    model_manifest_path: Path,
+) -> list[str]:
+    return [
+        "--manifest-path",
+        str(manifest_path),
+        "--local-output-root",
+        str(output_root),
+        "--config",
+        str(config_path),
+        "--model-manifest",
+        str(model_manifest_path),
+        "--worker-image-digest",
+        "local:reference-test",
+    ]
 
 
 def test_local_validate_only_writes_terminal_results_without_final_uri(tmp_path: Path) -> None:
@@ -247,6 +312,119 @@ def test_local_reference_inference_writes_the_documented_artifact_contract(
     assert result["combinedMaskUri"].endswith("/masks/combined_mask.png")
     assert background.calls == detection.calls == inpainting.calls == 1
     assert background.closed == detection.closed == inpainting.closed == 1
+
+
+def test_reference_batch_isolates_one_corrupt_item_across_five_items(
+    tmp_path: Path,
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    manifest_path = write_local_manifest(tmp_path, item_count=5, corrupt_item=2)
+    output_root = tmp_path / "output"
+    executor, background, detection, inpainting = reference_executor(config_path)
+
+    exit_code = entrypoint(
+        inference_arguments(
+            manifest_path=manifest_path,
+            output_root=output_root,
+            config_path=config_path,
+            model_manifest_path=model_manifest_path,
+        ),
+        executor=executor,
+    )
+
+    assert exit_code == 0
+    output_manifest = json.loads(
+        (output_root / "tenant_17/wm_batch/output-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert output_manifest["counts"] == {
+        "blocked": 0,
+        "failed": 1,
+        "skipped": 0,
+        "succeeded": 4,
+        "total": 5,
+    }
+    assert [item["itemId"] for item in output_manifest["items"]] == [
+        f"asset_{index}" for index in range(5)
+    ]
+    corrupt_result = json.loads(
+        (output_root / "tenant_17/wm_batch/asset_2/result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert corrupt_result["status"] == "FAILED"
+    assert corrupt_result["errorCode"] == "CORRUPT_IMAGE"
+    assert "finalUri" not in corrupt_result
+    assert background.calls == detection.calls == inpainting.calls == 4
+    assert background.closed == detection.closed == inpainting.closed == 1
+
+
+def test_reference_batch_resumes_after_interruption_and_skips_completed_items(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    manifest_path = write_local_manifest(tmp_path, item_count=5)
+    output_root = tmp_path / "output"
+    arguments = inference_arguments(
+        manifest_path=manifest_path,
+        output_root=output_root,
+        config_path=config_path,
+        model_manifest_path=model_manifest_path,
+    )
+    original_write_item = ResultWriter.write_item
+    write_count = 0
+
+    def interrupt_after_second_item(
+        writer: ResultWriter, *args: object, **kwargs: object
+    ) -> object:
+        nonlocal write_count
+        written = original_write_item(writer, *args, **kwargs)  # type: ignore[arg-type]
+        write_count += 1
+        if write_count == 2:
+            raise RetryableStorageError("simulated interruption after item commit")
+        return written
+
+    monkeypatch.setattr(ResultWriter, "write_item", interrupt_after_second_item)
+    first_executor, first_background, first_detection, first_inpainting = (
+        reference_executor(config_path)
+    )
+
+    assert entrypoint(arguments, executor=first_executor) == 6
+    assert not (output_root / "tenant_17/wm_batch/_COMPLETE.json").exists()
+    assert first_background.calls == first_detection.calls == 5
+    assert first_inpainting.calls == 2
+    assert first_background.closed == first_detection.closed == first_inpainting.closed == 1
+
+    monkeypatch.setattr(ResultWriter, "write_item", original_write_item)
+    second_executor, second_background, second_detection, second_inpainting = (
+        reference_executor(config_path)
+    )
+
+    assert entrypoint(arguments, executor=second_executor) == 0
+    assert second_background.calls == second_detection.calls == second_inpainting.calls == 3
+    assert second_background.closed == second_detection.closed == second_inpainting.closed == 1
+    output_manifest = json.loads(
+        (output_root / "tenant_17/wm_batch/output-manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert output_manifest["counts"] == {
+        "blocked": 0,
+        "failed": 0,
+        "skipped": 0,
+        "succeeded": 5,
+        "total": 5,
+    }
+
+    replay_executor, replay_background, replay_detection, replay_inpainting = (
+        reference_executor(config_path)
+    )
+
+    assert entrypoint(arguments, executor=replay_executor) == 0
+    assert replay_background.calls == replay_detection.calls == replay_inpainting.calls == 0
+    assert replay_background.closed == replay_detection.closed == replay_inpainting.closed == 0
 
 
 def test_cli_rejects_gcs_execution_without_pinned_manifest_generation(tmp_path: Path) -> None:
