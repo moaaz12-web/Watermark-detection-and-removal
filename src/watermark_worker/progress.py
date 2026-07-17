@@ -15,3 +15,4 @@ def emit_event(event_type: str, **fields: Any) -> None:
     }
     print(json.dumps(payload, sort_keys=True, separators=(",", ":")), file=sys.stdout, flush=True)
 
+
