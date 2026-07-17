@@ -1,8 +1,9 @@
 # GPU Watermark Worker: Production Setup Plan
 
-Status: Implementation in progress — production acceptance remains gated by W0 and W1
+Status: W2 and W4-W7 implementation complete — production acceptance remains gated by W0, W1,
+W3, and the deferred live/GPU checks
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 Implementation order: First
 
@@ -500,6 +501,12 @@ ENTRYPOINT ["python", "-m", "watermark_worker"]
 
 The image must be pushed to Artifact Registry with an immutable digest. Batch submissions use the digest, not `latest`.
 
+Container vulnerability handling follows
+[ADR-002](../decisions/ADR-002-container-vulnerability-policy.md). The automated image gate blocks
+embedded secrets and fixable high/critical findings. Unfixed severe base-image findings do not
+block the reference build automatically, but each remains a production-release review item. Any
+reachable finding requires remediation or a named, time-bounded exception before promotion.
+
 ## 14. Google Cloud Batch runtime
 
 Initial runtime configuration:
@@ -687,7 +694,7 @@ Verify:
 
 - GPU smoke test proves sequential model lifecycle, reports device metadata, and records peak resource use.
 
-### Current status (W1-W5)
+### Current status (W1-W7)
 
 - W1 remains open. The repository does not contain the approved production model-object
   generations/checksums, source revisions and patch hashes, license/provenance approvals, or the
@@ -710,7 +717,17 @@ Verify:
   work after W1 and W3.
 - W5's local batching and resumability implementation is complete. Integration tests cover a
   five-item batch, corrupt-item isolation, per-item checkpointing, interrupted execution, partial
-  replay, and a subsequent replay with zero model-stage calls. GCS execution remains W6 scope.
+  replay, and a subsequent replay with zero model-stage calls.
+- W6's implementation is complete. The GCS CLI path, generation-aware storage adapter, conditional
+  artifact and marker writes, stable storage-error classification, replay behavior, collision
+  handling, and stale-marker rejection are covered by a persistent fake GCS backend. The opt-in
+  real-GCS acceptance test remains deferred until isolated bucket prefixes and credentials exist.
+- W7's reference-container implementation is complete. The AMD64 image uses digest-pinned Python
+  and uv inputs, installs from `uv.lock`, removes runtime packaging tools, runs as UID/GID 10001,
+  and passes read-only, network-disabled CLI and replay smoke tests. Its pragmatic security gate
+  reports zero fixable high/critical findings and zero secrets. The full 2026-07-18 report contains
+  22 currently unfixed Debian findings; they are production-review items under ADR-002, not silent
+  allowlist entries. CUDA/L4, approved models, SIGTERM checkpointing, and Batch remain deferred.
 
 ### [x] W4. Extract one complete local pipeline path
 
@@ -746,30 +763,39 @@ Verify:
 - [ ] Repeat the five-image and interruption checks with approved production stages on the target
   GPU after W1, W3, W7, and W8.
 
-### W6. Add Cloud Storage adapter
+### [x] W6. Add Cloud Storage adapter
 
-Acceptance:
+Implementation acceptance:
 
-- Manifest and images can be read from approved GCS locations.
-- Manifest and source reads use the pinned GCS generations.
-- Artifacts are uploaded with `_COMPLETE.json` last, using generation preconditions.
-- Storage failures are classified as retryable or permanent with stable error codes.
-
-Verify:
-
-- Integration test in an isolated test prefix covers generation replacement, collision, replay, and stale-marker rejection.
-
-### W7. Build the production container
-
-Acceptance:
-
-- Image builds reproducibly.
-- Image runs as the documented CLI.
-- No runtime package installation, repo clone, public mutable model dependency, or remote executable model code remains.
+- [x] Manifest and images can be read through configured, deterministic GCS locations.
+- [x] Manifest and source reads use pinned GCS generations.
+- [x] Artifacts are uploaded with `_COMPLETE.json` last, using generation preconditions.
+- [x] Storage failures are classified as retryable or permanent with stable error codes.
 
 Verify:
 
-- Run local container smoke tests and scan the image for critical/high vulnerabilities.
+- [x] Hermetic integration tests cover generation replacement, collision, zero-write replay, and
+  stale-marker rejection with a generation-aware fake backend.
+- [ ] Run the opt-in live test against isolated GCS prefixes once credentials and test buckets are
+  configured.
+
+### [x] W7. Build the reference container
+
+Implementation acceptance:
+
+- [x] The Linux AMD64 image builds from digest-pinned base/tool images and the committed lock file.
+- [x] The image runs as the documented non-root CLI with a read-only root filesystem and no network.
+- [x] No runtime package installation, repo clone, public mutable model dependency, or remote
+  executable model code remains.
+- [x] Runtime `pip`, `setuptools`, and `wheel` are absent.
+
+Verify:
+
+- [x] Local container smoke and completed-job replay pass.
+- [x] The ADR-002 automated gate reports no secrets and no fixable high/critical vulnerabilities.
+- [ ] Review or remediate the 22 unfixed Debian findings before promoting a production image.
+- [ ] Replace the reference Python base with the approved CUDA/PyTorch GPU base and repeat the scan,
+  smoke test, SIGTERM checkpoint test, and CUDA/L4 checks after W1 and W3.
 
 ### W8. Submit a manual Batch GPU job
 
