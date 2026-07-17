@@ -1,6 +1,6 @@
 # GPU Watermark Worker: Production Setup Plan
 
-Status: Proposed
+Status: Proposed — implementation may begin only after W0 and W1 complete
 
 Last updated: 2026-07-17
 
@@ -71,7 +71,7 @@ The worker receives an immutable manifest stored in Cloud Storage. It does not q
 
 ### 3.4 One Batch task and one GPU initially
 
-Version 1 runs one worker task on one `g2-standard-4` VM with one L4 GPU. It loads the models once and processes all items sequentially.
+Version 1 runs one worker task on one `g2-standard-4` VM with one L4 GPU. It initializes each selected model stage once and processes all items sequentially.
 
 Creating one task per image is explicitly out of scope because repeated model initialization would waste time and GPU capacity.
 
@@ -81,7 +81,17 @@ Original images, masks, annotations, final images, manifests, and completion mar
 
 ### 3.6 At-least-once execution
 
-The worker must assume that a Batch task can be retried. Processing is idempotent at item level, and a retry skips items that already have a valid success marker.
+The worker must assume that a Batch task can be retried. Processing is idempotent at item level, and a retry skips items that already have a valid terminal marker.
+
+### 3.7 Accepted version-1 safety and output decisions
+
+The following decisions are intentional constraints, not implementation suggestions. Their rationale is recorded in [ADR-001](../decisions/ADR-001-worker-safety-and-idempotency.md).
+
+- Version 1 is a watermark-removal service, not a background-normalization service. The source image is the only permitted input to final inpainting. RMBG's white-background image is a detector and safety-gate artifact only; it is never a final customer output.
+- A proposed removal mask may be inpainted only after a valid product-overlap safety-gate evaluation. If RMBG fails, produces no foreground mask, or produces a foreground mask smaller than the approved minimum, the item is `BLOCKED_BY_SAFETY_GATE` with decision `UNVERIFIED`; LaMa must not run.
+- `BLOCKED_BY_SAFETY_GATE` and `SKIPPED_NO_WATERMARK` never produce `finalUri`. The application continues to reference the already-authorized source asset; the worker does not copy a white-background preprocessing artifact and call it a final image.
+- One worker run may contain terminal item failures and still exit `0` after it writes a complete job manifest. Exit `0` means the batch completed its reporting contract, not that every image was inpainted. Item outcomes remain visible in the manifest and application counters.
+- A Cloud Storage manifest and every input object are pinned to an immutable generation and SHA-256 checksum. Completed markers and the job completion marker are created with Cloud Storage generation preconditions.
 
 ## 4. Scope
 
@@ -90,10 +100,10 @@ The worker must assume that a Batch task can be retried. Processing is idempoten
 - Freeze and record pipeline version 1.
 - Extract notebook logic into importable Python modules.
 - Define manifest and result contracts.
-- Load models once per process.
+- Initialize each selected model stage once per process.
 - Process a batch from local files or Cloud Storage.
 - Preserve per-image review artifacts.
-- Resume safely using success markers.
+- Resume safely using terminal markers.
 - Package the worker in a GPU-compatible container.
 - Run the container manually through Google Cloud Batch.
 - Add unit, integration, GPU smoke, and manual regression checks.
@@ -112,50 +122,59 @@ The worker must assume that a Batch task can be retried. Processing is idempoten
 
 ## 5. Production pipeline specification
 
-Before code extraction, create a versioned configuration file such as `configs/watermark-v1.yaml` containing every behavior-changing value:
+Before code extraction, create a versioned configuration file such as `configs/watermark-v1.yaml` containing every behavior-changing value. A configuration containing `null`, `TBD`, a mutable URL, or a branch name is invalid and must be rejected at startup.
 
 ```yaml
 schema_version: 1
 pipeline_version: watermark-v1
 
 background_removal:
-  enabled: true
-  model: briaai/RMBG-1.4
+  enabled: true                         # required when safety_gate.enabled is true
+  detector_input: white_background
+  final_image_input: source_original
+  model_artifact_id: rmbg-1.4-<sha256>
 
 detection:
   mode: combined
   yolo:
     enabled: true
-    confidence: 0.25
+    model_artifact_id: watermark-yolo-<sha256>
+    confidence: 0.35
     iou: 0.5
     image_size: 1024
-    augment: false
+    augment: true
   grounding_dino:
     enabled: true
-    prompt: "watermark. logo. text overlay. brand mark."
-    box_threshold: null
-    text_threshold: null
+    model_artifact_id: grounding-dino-base-<sha256>
+    prompt: "watermark, logo, brand logo, text, label, sticker, stamp, copyright notice, graphic overlay, promotiona text, ecommerce text, commercial messaging, shipping text, discount offer"
+    box_threshold: 0.35
+    text_threshold: 0.55
 
 segmentation:
-  model: sam2.1_hiera_large
+  model_artifact_id: sam2.1-hiera-large-<sha256>
 
 safety_gate:
   enabled: true
-  per_detection_block: null
-  combined_warn: null
-  combined_block: null
+  failure_policy: block_unverified
+  per_detection_block: 0.40
+  combined_warn: 0.25
+  combined_block: 0.55
+  min_product_area_pixels: 500
 
 inpainting:
-  model: big-lama
+  model_artifact_id: big-lama-<sha256>
+  input: source_original
   mask_dilation_pixels: 2
   mask_threshold: 127
 ```
 
-The values shown above are placeholders where the validated notebook configuration has not yet been explicitly approved. Implementation must not silently invent missing thresholds.
+The values above are the current notebook candidate snapshot, not approval to ship. W1 replaces every `<sha256>` identifier with an approved model artifact and records the exact source revision, code patch hash, license review, and file checksum in `model-manifest.json`. Changing any listed value creates a new pipeline version.
 
-## 6. Private manual verification images
+The worker must run models by lifecycle stage: RMBG, detector/SAM, then LaMa. It releases a completed stage before loading the next one and must not keep every selected model resident simultaneously. This preserves the notebook's memory behavior while retaining one load per selected stage per process.
 
-Keep a simple private folder of approximately 10 authorized JPG images for manual notebook-versus-worker checks:
+## 6. Private evaluation set and quality gate
+
+Keep a private, versioned evaluation set of authorized or sanitized images. It begins with the following approximately 10-image smoke subset and grows whenever a useful failure case is found:
 
 ```text
 golden-images/
@@ -171,14 +190,17 @@ golden-images/
   10-unusual-aspect-ratio.jpg
 ```
 
-The exact filenames and mix may differ. Keep the images and filenames unchanged so repeated runs use the same inputs. Add a new authorized or sanitized image when a useful failure case is discovered.
+The exact filenames and mix may differ. Keep image bytes and filenames unchanged so repeated runs use the same inputs. Store a private manifest alongside the images containing each source checksum, expected decision (`INPAINTED`, `SKIPPED_NO_WATERMARK`, or `BLOCKED_BY_SAFETY_GATE`), risk class, and human approval record.
 
-Version 1 does not require a formal dataset schema, automated image-quality metrics, or a versioned baseline registry. Verification is manual:
+The evaluation set must include both editable watermark cases and high-risk negative cases: clean products, product logos, printed text, small/partial products, transparent overlays, large overlays, high-resolution images, and unusual aspect ratios. The high-risk negative cases have a strict rule: no unapproved product alteration and no inpainting when the safety gate is unavailable.
 
-1. Run the selected notebook on the folder.
-2. Run the extracted worker on the same folder.
-3. Compare detections, masks, safety-gate decisions, and final images side by side.
-4. Approve the worker when there is no material unapproved regression.
+Verification combines automated and manual checks:
+
+1. Record the source notebook outputs as an exploratory reference before extraction.
+2. Run the extracted worker with the pinned image, config, and model manifests.
+3. Assert expected decisions and source checksums automatically.
+4. Compare masks and final images side by side for every changed decision or high-risk case.
+5. Require named human approval for any intentional quality change; otherwise it is a regression.
 
 The folder is an offline development and staging aid only. It is not bundled into the worker image, referenced by production code, or included in customer production jobs. Production jobs contain arbitrary product images supplied through their own manifests.
 
@@ -190,7 +212,8 @@ The worker accepts exactly one manifest location:
 
 ```bash
 python -m watermark_worker \
-  --manifest-uri gs://watermark-jobs/tenant-17/wm_123/input-manifest.json
+  --manifest-uri gs://watermark-jobs/tenant-17/wm_123/input-manifest.json \
+  --manifest-generation 1721210400123456
 ```
 
 For local development, it also accepts a local manifest path:
@@ -201,7 +224,7 @@ python -m watermark_worker \
   --local-output-root /tmp/watermark-output
 ```
 
-`--manifest-uri` and `--manifest-path` are mutually exclusive.
+`--manifest-uri` and `--manifest-path` are mutually exclusive. `--manifest-generation` is required for Cloud Storage execution and forbidden for local development. FastAPI writes the manifest, records its returned GCS generation, and passes that generation to Batch; the worker reads exactly that generation with no live-object fallback.
 
 ### 7.2 Manifest schema
 
@@ -216,8 +239,9 @@ python -m watermark_worker \
     {
       "itemId": "asset_123",
       "inputUri": "gs://watermark-input/tenant-17/wm_123/asset_123.png",
+      "inputGeneration": "1721210300123456",
       "outputPrefix": "gs://watermark-output/tenant-17/wm_123/asset_123/",
-      "sourceChecksumSha256": "optional-lowercase-hex-value"
+      "sourceChecksumSha256": "required-lowercase-64-character-hex-value"
     }
   ]
 }
@@ -229,10 +253,12 @@ python -m watermark_worker \
 - `jobId`, `tenantId`, and `itemId` must match documented length and character restrictions.
 - `pipelineVersion` must exactly match a configuration packaged with the worker image.
 - The manifest must contain at least one item and remain below a configured maximum item count.
-- Input and output URIs must use approved buckets and prefixes.
+- The worker reads the manifest at the required GCS generation and rejects a missing, changed, or mismatched generation.
+- Cloud Storage items require an `inputGeneration` and `sourceChecksumSha256`. The worker reads that exact input generation and verifies the decoded bytes against the checksum before inference. Local test manifests use a local path plus the same required checksum, but no GCS generation.
+- Input and output URIs must use approved buckets and the exact deterministic prefixes derived from `tenantId`, `jobId`, and `itemId`; the worker rejects arbitrary paths even if they use an approved bucket.
 - Duplicate `itemId` or output prefixes are rejected.
 - The worker validates decoded image type, dimensions, and pixel count; it does not trust the filename or MIME metadata alone.
-- The manifest is immutable after Batch submission. A changed batch requires a new application job and manifest.
+- A changed manifest or source object requires a new application job and manifest. Cloud Storage object names alone are insufficient identity because the live object at a name can be replaced.
 
 ## 8. Output contract
 
@@ -251,12 +277,12 @@ python -m watermark_worker \
     combined_mask.png
     mask_000.png
   inpainted/
-    final.png
+    final.png                 # present only for decision INPAINTED
   result.json
-  _SUCCESS.json
+  _COMPLETE.json
 ```
 
-Only enabled stages need to produce their optional artifacts. `result.json` and `_SUCCESS.json` have stable meanings.
+Only enabled stages need to produce their optional artifacts. `result.json` and `_COMPLETE.json` have stable meanings. `white_background.png` is diagnostic/preprocessing output only and cannot be exposed as `finalUri`.
 
 ### 8.2 Result schema
 
@@ -268,7 +294,11 @@ Only enabled stages need to produce their optional artifacts. `result.json` and 
   "status": "SUCCEEDED",
   "pipelineVersion": "watermark-v1",
   "workerImageDigest": "sha256:...",
+  "configSha256": "...",
+  "modelManifestSha256": "...",
   "sourceUri": "gs://watermark-input/tenant-17/wm_123/asset_123.png",
+  "sourceGeneration": "1721210300123456",
+  "sourceChecksumSha256": "...",
   "finalUri": "gs://watermark-output/tenant-17/wm_123/asset_123/inpainted/final.png",
   "combinedMaskUri": "gs://watermark-output/tenant-17/wm_123/asset_123/masks/combined_mask.png",
   "detectionCount": 2,
@@ -286,23 +316,26 @@ Allowed item statuses:
 - `BLOCKED_BY_SAFETY_GATE`
 - `SKIPPED_NO_WATERMARK`
 
-Allowed decisions and error codes must be enumerated in code rather than created as arbitrary strings.
+`finalUri` is required only for `SUCCEEDED` with decision `INPAINTED`; it is absent for `FAILED`, `BLOCKED_BY_SAFETY_GATE`, and `SKIPPED_NO_WATERMARK`. `BLOCKED_BY_SAFETY_GATE` uses decision `UNVERIFIED` or `BLOCKED`; `SKIPPED_NO_WATERMARK` uses decision `NO_WATERMARK`. Allowed decisions and error codes must be enumerated in code rather than created as arbitrary strings.
 
-### 8.3 Success marker
+### 8.3 Terminal item marker
 
-`_SUCCESS.json` is written last, after all required item artifacts have been uploaded and validated. It contains enough information to verify that the completed output belongs to the current source checksum, pipeline version, and worker image digest.
+`_COMPLETE.json` is written last, after all required item artifacts and `result.json` have been uploaded and validated. It is written for every terminal item outcome, including a deliberately failed corrupt image, so a retry can distinguish a recorded terminal result from an interrupted item.
 
-An existing marker is reusable only when those values match. Otherwise the worker must treat the item as stale and either fail safely or write to a new versioned output prefix; it must not overwrite an incompatible completed result silently.
+The marker contains the manifest generation, source generation and checksum, pipeline version, config hash, model-manifest hash, worker image digest, result checksum, and object generations/checksums for required artifacts. An existing marker is reusable only when all values match. Otherwise the worker fails with a stale-output error; it never overwrites an incompatible completed result silently.
+
+Artifact objects and markers use Cloud Storage generation preconditions. Create requests use `ifGenerationMatch=0`; a collision is reusable only after checksum and metadata validation. This prevents two retries from silently replacing one another's artifacts. Cloud Storage documents preconditions as the mechanism for safe conditional operations: <https://docs.cloud.google.com/storage/docs/request-preconditions>.
 
 ### 8.4 Job output manifest
 
-After iterating over all items, the worker writes:
+After iterating over all items, the worker writes an `output-manifest.json`, validates that it references a terminal marker for every requested item, and then creates the job-level completion marker:
 
 ```text
 gs://watermark-output/tenant-17/wm_123/output-manifest.json
+gs://watermark-output/tenant-17/wm_123/_COMPLETE.json
 ```
 
-It contains counts, per-item result references, timings, worker version, and the overall outcome.
+The output manifest contains counts, per-item result references, timings, manifest generation, configuration/model hashes, worker version, and the overall outcome. The job marker contains the output-manifest generation and checksum. Consumers must treat a job as complete only when the compatible job marker exists; an output manifest without that marker may belong to an interrupted attempt.
 
 ## 9. Worker execution behavior
 
@@ -311,21 +344,23 @@ The worker performs these steps in order:
 1. Validate environment and configuration.
 2. Download and validate the input manifest.
 3. Initialize structured logging with `jobId` and pipeline version.
-4. Validate model files and checksums.
-5. Load the selected models exactly once.
-6. Record GPU, CUDA, system RAM, and worker image metadata.
-7. For each item:
-   1. Check for a compatible `_SUCCESS.json`.
+4. Read the manifest and every source image at their pinned GCS generations; verify every required source checksum.
+5. Validate the pinned configuration, model-manifest hash, model files, and checksums.
+6. Load models once per lifecycle stage, releasing RMBG before detector/SAM and detector/SAM before LaMa.
+7. Record GPU, CUDA, system RAM, local disk, and worker image metadata.
+8. For each item:
+   1. Check for a compatible `_COMPLETE.json`.
    2. Download and validate the source image.
-   3. Run enabled pipeline stages.
-   4. Write artifacts to a temporary local item directory.
-   5. Upload artifacts to Cloud Storage.
-   6. Upload `result.json`.
-   7. Upload `_SUCCESS.json` last.
-   8. Emit a progress event.
-   9. Release item tensors and temporary files.
-8. Write the job output manifest.
-9. Emit final metrics and exit.
+   3. Use RMBG only for detector preprocessing and the product-overlap gate; use the original source image as the LaMa input.
+   4. If the gate is unavailable, unreliable, or blocks the removal, write a terminal blocked result and do not run LaMa.
+   5. Write artifacts to a temporary local item directory.
+   6. Upload artifacts to Cloud Storage with generation preconditions.
+   7. Upload `result.json`.
+   8. Upload `_COMPLETE.json` last.
+   9. Emit a progress event.
+   10. Release item tensors and temporary files.
+9. Write and validate the job output manifest, then create the job `_COMPLETE.json` marker with a generation precondition.
+10. Emit final metrics and exit.
 
 One invalid image should normally produce a failed item result and allow the batch to continue. A missing model, unsupported manifest, unavailable GPU, corrupt configuration, or inaccessible output bucket is a fatal job error.
 
@@ -335,14 +370,16 @@ Proposed process exit codes:
 
 | Code | Meaning |
 | ---: | --- |
-| `0` | Worker completed and wrote a job output manifest. Individual item failures may be present and are represented in that manifest. |
+| `0` | Worker completed and wrote a compatible job output manifest and job `_COMPLETE.json`. Individual terminal item failures or blocks may be present in that manifest. |
 | `2` | Invalid command or unsupported manifest/configuration. |
 | `3` | Required model or model checksum failure. |
 | `4` | GPU/CUDA initialization failure. |
-| `5` | Fatal storage or permissions failure. |
+| `5` | Permanent storage or permissions failure. |
+| `6` | Retryable storage/network failure; no compatible job completion marker was written. |
+| `7` | Retryable external platform dependency failure; no compatible job completion marker was written. |
 | `10` | Unexpected fatal worker failure. |
 
-The exact mapping must be tested and documented in the worker package.
+Batch retries only `6` and `7`, once initially. It must fail tasks for all other worker exit codes. The exact mapping and Batch lifecycle policy must be tested and documented in the worker package.
 
 ## 11. Proposed project structure
 
@@ -399,6 +436,7 @@ Avoid abstractions that are not required by pipeline version 1. Each stage bound
 - Do not clone repositories during job execution.
 - Pin upstream source dependencies to released packages or specific commit SHAs during image build.
 - Preserve required LaMa compatibility changes as reviewed patches or maintained source, with tests that fail if an upstream layout changes.
+- Do not use Hugging Face `trust_remote_code=True` or download executable model code at worker startup. Vendor or package reviewed custom model code in the image, pinned to a reviewed source revision.
 
 ### Model files
 
@@ -410,21 +448,25 @@ Avoid abstractions that are not required by pipeline version 1. Each stage bound
 - SHA-256 checksum.
 - Size.
 - Required pipeline stages.
+- Immutable private object URI and GCS generation when the model is fetched at startup.
+- Source-code revision/patch hash when the model needs custom loading code.
+- License and commercial-use review status.
 
-Model files can initially be downloaded from a private, versioned Cloud Storage prefix during container startup. Baking them into the container can be evaluated after measuring startup and pull times. Mutable public URLs are not a production model registry.
+Model files are initially downloaded from a private, versioned Cloud Storage prefix during container startup, at pinned generations and with checksum validation. Baking them into the container can be evaluated after measuring startup and pull times. Mutable public URLs, mutable repository branches, and runtime repository clones are not a production model registry.
 
 ## 13. Container requirements
 
 The worker image must:
 
 - Use a supported Linux AMD64 CUDA/PyTorch base compatible with the L4 driver.
-- Run as a non-root user where practical.
+- Run as a non-root user.
 - Include application code and pinned runtime dependencies.
 - Use a deterministic entrypoint.
 - Write temporary files only under a configured working directory.
 - Handle `SIGTERM` by stopping after the current safe checkpoint when time permits.
 - Emit logs to stdout/stderr.
 - Avoid including GCP service-account keys or application database secrets.
+- Contain no executable code fetched dynamically from model providers.
 
 Example entrypoint:
 
@@ -439,29 +481,36 @@ The image must be pushed to Artifact Registry with an immutable digest. Batch su
 Initial runtime configuration:
 
 ```text
-Machine type:       g2-standard-4
-GPU:                1 x NVIDIA L4, attached by the G2 machine type
-Provisioning model: STANDARD (on-demand)
-Tasks:              1
-Parallelism:        1
-Task timeout:       20 hours initially
-Retries:            1 initially, after resumability is verified
-Boot disk:          Sized after measuring container, model cache, and temp data
-Region:             Same single region as input/output buckets
-Logs:               Cloud Logging
+Machine type:         g2-standard-4 (4 vCPU, 16 GB RAM, 1 x 24 GB NVIDIA L4)
+Provisioning model:   STANDARD (on-demand)
+Reservation policy:   NO_RESERVATION
+Tasks / parallelism:  1 / 1
+Task timeout:         20 hours
+Retries:              maxRetryCount: 1, only worker exit codes 6 and 7
+Boot disk:            200 GB for the first benchmark; resize only from measured evidence
+Locations:            Explicit approved L4-capable zone(s), selected after quota/capacity validation
+Identity:             Explicit dedicated GPU worker service account; never the Compute default account
+Networking:           Approved VPC; Private Google Access/Cloud NAT or equivalent for required services
+Logs:                 Cloud Logging
 ```
 
-Manual Batch submission must be proven before FastAPI integration. Batch should install the host GPU driver automatically unless a later requirement justifies a custom VM image.
+The initial staging job uses `installGpuDrivers: true` with a supported OS, explicit network egress for the driver installation, and the immutable worker-image digest. Google Batch requires this field for automatic driver installation; the field defaults to `false`. If the production network cannot allow that dependency, the production job must instead use a tested custom VM image with GPU drivers and the NVIDIA Container Toolkit, and set `installGpuDrivers: false`. See [Google's GPU Batch guidance](https://docs.cloud.google.com/batch/docs/create-run-job-gpus).
+
+Manual Batch submission must be proven before FastAPI integration. The first benchmark is a capacity gate, not proof that this is the final VM shape: `g2-standard-4` supplies 16 GB system RAM and 24 GB GPU memory. Record peak system RAM, VRAM, disk, startup time, and five-image runtime before retaining or increasing the shape. See [G2 machine specifications](https://docs.cloud.google.com/compute/docs/gpus).
+
+The Batch template must explicitly set the service account, `installGpuDrivers`, `machineType`, `provisioningModel`, `reservation`, allowed locations, task timeout, retry lifecycle policy, network, and digest image URI. Do not rely on Batch defaults.
 
 Official references:
 
 - [Create and run a Google Cloud Batch job that uses GPUs](https://docs.cloud.google.com/batch/docs/create-run-job-gpus)
 - [Google Cloud Batch job lifecycle](https://docs.cloud.google.com/batch/docs/create-run-job)
+- [Automate task retries](https://docs.cloud.google.com/batch/docs/automate-task-retries)
+- [Batch networking overview](https://docs.cloud.google.com/batch/docs/networking-overview)
 - [Google Cloud Batch pricing](https://cloud.google.com/batch/pricing)
 
 ## 15. Security boundaries
 
-The Batch worker service account should have only the permissions required to:
+The Batch worker service account is required, named explicitly in the Batch allocation policy, and has only the permissions required to:
 
 - Pull the worker image from its Artifact Registry repository.
 - Read approved model and input objects.
@@ -475,6 +524,8 @@ It must not have:
 - User authentication secrets.
 - Broad project owner/editor permissions.
 - Permission to create arbitrary Batch jobs.
+
+IAM bindings must be restricted to the Artifact Registry repository and the approved GCS object prefixes, using IAM Conditions where available. The worker does not receive a service-account key. Default VPC egress is not permitted: configure the VPC and firewall explicitly, allow only the required Google APIs and staging driver-install route, and remove general internet egress from the production worker after the driver strategy is proven.
 
 Input controls must include:
 
@@ -517,7 +568,7 @@ Logs must not contain signed URLs, bearer tokens, raw service-account credential
 - Manifest parsing and validation.
 - Configuration validation.
 - Output path construction.
-- Success-marker compatibility checks.
+- Terminal-marker compatibility checks.
 - Mask preparation and combination.
 - State/result enumeration.
 - Error-to-exit-code mapping.
@@ -530,7 +581,10 @@ Unit tests must not require a GPU.
 - Cloud Storage read/write against a test project or isolated bucket prefix.
 - One deliberately corrupt image among valid images.
 - Rerun skips compatible completed items.
-- Stale success marker is rejected.
+- Stale terminal marker is rejected.
+- A replaced manifest or source object generation is rejected.
+- Concurrent/replayed completion-marker writes are protected by generation preconditions.
+- A blocked, missing, or unreliable product mask never invokes LaMa and never yields `finalUri`.
 
 ### GPU smoke tests
 
@@ -538,35 +592,52 @@ Unit tests must not require a GPU.
 - Every selected model loads.
 - One representative image completes end to end.
 - A five-image manifest completes in one process.
-- Model initialization occurs once.
+- Each selected model stage initializes once, and completed model stages are released before the next stage.
+- Peak VRAM, system RAM, local disk, and model initialization time are recorded.
 
 ### Manual regression check
 
-- Run the private folder of approximately 10 JPG images through the selected notebook and worker.
-- Compare detections, masks, safety-gate decisions, and final images manually.
-- Require human approval for material or intentional quality changes.
+- Assert expected item decisions from the private evaluation manifest.
+- Review every high-risk negative case and every changed decision/mask/final image side by side.
+- Require human approval for material or intentional quality changes; reject any unapproved product alteration.
 
 ### Batch acceptance test
 
 - Submit the image digest manually to Batch.
 - Confirm the task uses an L4.
 - Confirm artifacts and output manifest are written.
+- Confirm only the compatible job `_COMPLETE.json` allows the manifest to be consumed.
 - Confirm the VM is deleted after completion.
-- Confirm a retry resumes instead of reprocessing completed items.
+- Confirm a retry resumes from compatible terminal markers instead of reprocessing completed items.
+- Confirm only retryable exit codes are retried.
 
 ## 18. Implementation tasks
+
+### W0. Close safety, storage, and infrastructure decisions
+
+Acceptance:
+
+- The decisions in section 3.7 and ADR-001 are accepted by the worker and product owners.
+- The final-image policy is `source_original`; preprocessing artifacts are never customer final images.
+- The source/manifest generation and checksum contract, terminal-marker preconditions, and retryable exit codes are approved.
+- An explicit Batch template identifies the service account, driver strategy, VPC, allowed locations, and image digest input.
+
+Verify:
+
+- Review the contract with the FastAPI/orchestration owner before either service is implemented.
 
 ### W1. Freeze pipeline version 1
 
 Acceptance:
 
 - One notebook path and enabled stage set are selected.
-- All model versions, prompts, thresholds, and safety-gate values are recorded.
-- A private folder of approximately 10 representative JPG images is available for manual checks.
+- All model artifact generations/checksums, source revisions, prompts, thresholds, and safety-gate values are recorded.
+- Custom-weight provenance and licenses are approved.
+- A private evaluation manifest contains expected decisions and approvals for representative and high-risk negative images.
 
 Verify:
 
-- Run the selected notebook on the private image folder and review its outputs.
+- Record the selected notebook outputs as a reference and approve the pinned production configuration.
 
 ### W2. Add contracts and local CLI shell
 
@@ -574,11 +645,11 @@ Acceptance:
 
 - The worker validates a version 1 manifest.
 - Local input/output mode works without model inference.
-- Result and success-marker schemas are represented by typed Python models.
+- Result, terminal-marker, and job-marker schemas are represented by typed Python models.
 
 Verify:
 
-- Unit tests cover valid, invalid, duplicate, and unsupported manifests.
+- Unit tests cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched manifests.
 
 ### W3. Extract model initialization
 
@@ -590,7 +661,7 @@ Acceptance:
 
 Verify:
 
-- GPU smoke test loads every model once and reports device metadata.
+- GPU smoke test proves sequential model lifecycle, reports device metadata, and records peak resource use.
 
 ### W4. Extract one complete local pipeline path
 
@@ -602,31 +673,33 @@ Acceptance:
 
 Verify:
 
-- Run the worker on the private image folder and manually compare its outputs with the notebook outputs.
+- Run the worker on the private evaluation set; assert expected decisions and manually review all high-risk outputs.
 
 ### W5. Add batch iteration and resumability
 
 Acceptance:
 
-- A five-image manifest runs with one model initialization.
+- A five-image manifest initializes each selected model stage once.
 - Completed items are skipped on rerun.
 - One corrupt image does not abort remaining items.
+- An unverified safety gate blocks inpainting and leaves `finalUri` absent.
 
 Verify:
 
-- Interrupt and rerun a local batch; inspect result and success markers.
+- Interrupt and rerun a local batch; inspect result, terminal, and job markers.
 
 ### W6. Add Cloud Storage adapter
 
 Acceptance:
 
 - Manifest and images can be read from approved GCS locations.
-- Artifacts are uploaded with `_SUCCESS.json` last.
-- Storage failures produce stable error codes.
+- Manifest and source reads use the pinned GCS generations.
+- Artifacts are uploaded with `_COMPLETE.json` last, using generation preconditions.
+- Storage failures are classified as retryable or permanent with stable error codes.
 
 Verify:
 
-- Integration test in an isolated test prefix and inspect object metadata.
+- Integration test in an isolated test prefix covers generation replacement, collision, replay, and stale-marker rejection.
 
 ### W7. Build the production container
 
@@ -634,7 +707,7 @@ Acceptance:
 
 - Image builds reproducibly.
 - Image runs as the documented CLI.
-- No runtime package installation, repo clone, or public mutable model dependency remains.
+- No runtime package installation, repo clone, public mutable model dependency, or remote executable model code remains.
 
 Verify:
 
@@ -646,19 +719,19 @@ Acceptance:
 
 - Batch creates an on-demand `g2-standard-4` VM.
 - CUDA and L4 detection succeed.
-- A five-image manifest completes and writes its output manifest.
+- A five-image manifest completes and writes a compatible output manifest and job completion marker.
 - Batch removes the VM after completion.
 
 Verify:
 
-- Review Batch state, Cloud Logging, GCS artifacts, runtime, and billing labels.
+- Review Batch state, Cloud Logging, GCS marker generations, runtime, resource metrics, and billing labels.
 
 ### W9. Run representative performance and quality evaluation
 
 Acceptance:
 
-- Representative batch runtime, throughput, peak VRAM/RAM, failures, and cost are recorded.
-- Outputs for the private verification images receive manual human review.
+- Representative batch runtime, throughput, peak VRAM/RAM/disk, failures, and cost are recorded.
+- Outputs for the private evaluation images meet automated decision expectations and receive required human review.
 - The selected machine and disk sizes are confirmed or adjusted from evidence.
 
 Verify:
@@ -672,21 +745,22 @@ Worker foundation is complete when:
 - The notebook is no longer required for batch execution.
 - The production pipeline and models are pinned and versioned.
 - One container command processes local and GCS manifests.
-- Models load once per process.
+- Each selected model stage initializes once per process.
 - Per-item artifacts follow the documented contract.
 - Retries skip compatible completed items.
+- Blocked or unverified items never run LaMa and never expose a preprocessing image as final output.
+- Manifest, source, item marker, and job marker identities are generation- and checksum-verified.
 - A manual Google Cloud Batch L4 execution succeeds.
 - Manual notebook-versus-worker review shows no unapproved material regression.
 - Runtime and resource measurements support the chosen VM shape.
 - No API database or user-authentication secret is present in the worker.
 
-## 20. Open decisions before W1
+## 20. Remaining inputs before W1 and release
 
-- Which exact detector configuration is production version 1?
-- Is RMBG enabled for every input or only selected product categories?
-- What safety-gate thresholds are approved?
-- Which artifacts must be retained, and for how long?
-- What maximum image dimensions, bytes, and batch item count are allowed?
-- Does an item-level failure allow the overall job to succeed with warnings?
-- Are model weights baked into the image or downloaded from a versioned private bucket?
-- What quality review determines that the worker matches the notebook sufficiently?
+The architecture decisions are closed; the following concrete values must be supplied by W1 or the environment owner and must not be guessed during implementation:
+
+- Approved model-object generations, checksums, source revisions, and custom-weight license/provenance records.
+- Exact maximum compressed bytes, dimensions, pixel count, and item count.
+- Artifact retention, lifecycle, and deletion policy for originals, masks, annotations, and final images.
+- Approved VPC, L4-capable zone(s), quota/capacity result, and service-account identities.
+- Benchmark evidence confirming the VM shape and boot-disk size, or the approved larger replacement.
