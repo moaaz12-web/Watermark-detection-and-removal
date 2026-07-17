@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from PIL import Image
 
 from watermark_worker.config import SafetyGateConfig
@@ -10,6 +11,7 @@ from watermark_worker.pipeline import (
     InpaintingOutput,
     PipelineExecutor,
     PipelineItem,
+    PipelineOutcome,
 )
 from watermark_worker.stages.safety_gate import BinaryMask
 
@@ -132,3 +134,52 @@ def test_no_watermark_skips_without_calling_inpainting() -> None:
     assert outcome.decision is Decision.NO_WATERMARK
     assert outcome.final_image is None
     assert inpainting.calls == []
+
+
+def test_executor_emits_each_terminal_outcome_once() -> None:
+    emitted = []
+    executor = PipelineExecutor(
+        background_removal=BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1))),
+        detection=DetectorStage((mask((3, 3)),)),
+        inpainting=InpaintingStage(),
+        safety_gate=gate_config(),
+    )
+    items = [
+        PipelineItem(item_id=f"asset_{index}", source_image=source_image())
+        for index in range(3)
+    ]
+
+    outcomes = executor.process(items, on_terminal=emitted.append)
+
+    assert [outcome.item_id for outcome in emitted] == ["asset_0", "asset_1", "asset_2"]
+    assert emitted == outcomes
+
+
+def test_terminal_callback_interruption_stops_processing_and_releases_stages() -> None:
+    background = BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1)))
+    detector = DetectorStage((mask((3, 3)),))
+    inpainting = InpaintingStage()
+    executor = PipelineExecutor(
+        background_removal=background,
+        detection=detector,
+        inpainting=inpainting,
+        safety_gate=gate_config(),
+    )
+    emitted = []
+
+    def interrupt(outcome: PipelineOutcome) -> None:
+        emitted.append(outcome)
+        raise RuntimeError("simulated checkpoint interruption")
+
+    with pytest.raises(RuntimeError, match="checkpoint interruption"):
+        executor.process(
+            [
+                PipelineItem(item_id=f"asset_{index}", source_image=source_image())
+                for index in range(3)
+            ],
+            on_terminal=interrupt,
+        )
+
+    assert len(emitted) == 1
+    assert len(inpainting.calls) == 1
+    assert background.closed == detector.closed == inpainting.closed == 1

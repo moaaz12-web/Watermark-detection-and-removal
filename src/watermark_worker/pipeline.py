@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -95,16 +96,34 @@ class PipelineExecutor:
         self.inpainting = inpainting
         self.safety_gate = safety_gate
 
-    def process(self, items: list[PipelineItem]) -> list[PipelineOutcome]:
+    def process(
+        self,
+        items: list[PipelineItem],
+        *,
+        on_terminal: Callable[[PipelineOutcome], None] | None = None,
+    ) -> list[PipelineOutcome]:
         outcomes: list[PipelineOutcome | None] = [None] * len(items)
+
+        def record(index: int, outcome: PipelineOutcome) -> None:
+            if outcomes[index] is not None:
+                raise RuntimeError(
+                    f"item {outcome.item_id} produced more than one terminal outcome"
+                )
+            outcomes[index] = outcome
+            if on_terminal is not None:
+                on_terminal(outcome)
+
         background_outputs: dict[int, BackgroundRemovalOutput] = {}
         try:
             for index, item in enumerate(items):
                 try:
                     background_outputs[index] = self.background_removal.run(item.source_image)
                 except Exception as exc:
-                    outcomes[index] = _failed_outcome(
-                        item=item, error_code=ErrorCode.DETECTOR_FAILED, error=exc
+                    record(
+                        index,
+                        _failed_outcome(
+                            item=item, error_code=ErrorCode.DETECTOR_FAILED, error=exc
+                        ),
                     )
         finally:
             self.background_removal.close()
@@ -115,13 +134,17 @@ class PipelineExecutor:
                 try:
                     detection_outputs[index] = self.detection.run(background.detector_image)
                 except Exception as exc:
-                    outcomes[index] = _failed_outcome(
-                        item=items[index], error_code=ErrorCode.DETECTOR_FAILED, error=exc
+                    record(
+                        index,
+                        _failed_outcome(
+                            item=items[index], error_code=ErrorCode.DETECTOR_FAILED, error=exc
+                        ),
                     )
         finally:
             self.detection.close()
 
         allowed_masks: dict[int, BinaryMask] = {}
+        allowed_outcomes: dict[int, PipelineOutcome] = {}
         for index, detection in detection_outputs.items():
             background = background_outputs[index]
             evaluation = evaluate_safety_gate(
@@ -144,21 +167,22 @@ class PipelineExecutor:
                 evaluation=evaluation,
                 artifacts=tuple(artifacts),
             )
-            outcomes[index] = outcome
             if (
                 evaluation.decision is SafetyDecision.ALLOWED
                 and evaluation.approved_mask is not None
             ):
                 allowed_masks[index] = evaluation.approved_mask
+                allowed_outcomes[index] = outcome
+            else:
+                record(index, outcome)
 
         try:
             for index, approved_mask in allowed_masks.items():
                 try:
                     # The original source is intentionally the only inpainting input.
                     inpainted = self.inpainting.run(items[index].source_image, approved_mask)
-                    previous = outcomes[index]
-                    assert previous is not None
-                    outcomes[index] = PipelineOutcome(
+                    previous = allowed_outcomes[index]
+                    outcome = PipelineOutcome(
                         item_id=previous.item_id,
                         status=ItemStatus.SUCCEEDED,
                         decision=Decision.INPAINTED,
@@ -170,22 +194,24 @@ class PipelineExecutor:
                         safety_gate=previous.safety_gate,
                     )
                 except Exception as exc:
-                    outcomes[index] = _failed_outcome(
+                    outcome = _failed_outcome(
                         item=items[index], error_code=ErrorCode.INPAINTING_FAILED, error=exc
                     )
+                record(index, outcome)
         finally:
             self.inpainting.close()
 
-        return [
-            outcome
-            if outcome is not None
-            else _failed_outcome(
-                item=item,
-                error_code=ErrorCode.UNEXPECTED_FATAL,
-                error=RuntimeError("pipeline produced no terminal outcome"),
-            )
-            for item, outcome in zip(items, outcomes, strict=True)
-        ]
+        terminal: list[PipelineOutcome] = []
+        for index, (item, current) in enumerate(zip(items, outcomes, strict=True)):
+            if current is None:
+                current = _failed_outcome(
+                    item=item,
+                    error_code=ErrorCode.UNEXPECTED_FATAL,
+                    error=RuntimeError("pipeline produced no terminal outcome"),
+                )
+                record(index, current)
+            terminal.append(current)
+        return terminal
 
 
 def _outcome_for_gate(
