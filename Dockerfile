@@ -2,7 +2,7 @@
 
 # Base-image digest pinning and non-root runtime follow:
 # https://docs.docker.com/build/building/best-practices/
-ARG PYTHON_IMAGE=python:3.11.15-slim-bookworm@sha256:28255a3ace7eb4c48bc1b57b90af29e1bc82b4fd6c60614a8e3dce61b87ff941
+ARG PYTHON_IMAGE=python:3.11.15-slim-trixie@sha256:00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045
 
 FROM ${PYTHON_IMAGE} AS builder
 
@@ -27,7 +27,8 @@ ENV HOME=/home/watermark-worker \
     PYTHONUNBUFFERED=1 \
     TMPDIR=/tmp/watermark-worker
 
-RUN groupadd --gid 10001 watermark-worker \
+RUN python -m pip uninstall --yes pip setuptools wheel \
+    && groupadd --gid 10001 watermark-worker \
     && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/watermark-worker watermark-worker \
     && mkdir -p /tmp/watermark-worker \
     && chown 10001:10001 /tmp/watermark-worker

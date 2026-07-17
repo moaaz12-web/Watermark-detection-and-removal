@@ -10,9 +10,14 @@ def dockerfile() -> str:
 def test_container_uses_immutable_build_inputs_and_locked_runtime_dependencies() -> None:
     content = dockerfile()
 
-    assert "python:3.11.15-slim-bookworm@sha256:" in content
+    assert (
+        "python:3.11.15-slim-trixie@sha256:"
+        "00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045"
+        in content
+    )
     assert "ghcr.io/astral-sh/uv@sha256:" in content
     assert "uv sync --locked --no-dev --no-editable" in content
+    assert "python -m pip uninstall --yes pip setuptools wheel" in content
     assert "pip install" not in content
 
 

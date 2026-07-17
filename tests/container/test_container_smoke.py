@@ -50,6 +50,20 @@ def test_locked_container_runs_validate_only_as_non_root_and_replays(
         "image", "inspect", "--format", "{{.Config.User}}", image
     ).stdout.strip()
     assert configured_user == "10001:10001"
+    packaging_tools = docker(
+        "run",
+        "--rm",
+        "--entrypoint",
+        "python",
+        image,
+        "-c",
+        (
+            "import importlib.util; "
+            "print(*(importlib.util.find_spec(name) for name in "
+            "('pip', 'setuptools', 'wheel')))"
+        ),
+    ).stdout.strip()
+    assert packaging_tools == "None None None"
 
     run_arguments = (
         "run",
