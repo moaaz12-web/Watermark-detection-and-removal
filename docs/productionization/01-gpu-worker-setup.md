@@ -1,6 +1,6 @@
 # GPU Watermark Worker: Production Setup Plan
 
-Status: Proposed — implementation may begin only after W0 and W1 complete
+Status: Implementation in progress — production acceptance remains gated by W0 and W1
 
 Last updated: 2026-07-17
 
@@ -687,7 +687,7 @@ Verify:
 
 - GPU smoke test proves sequential model lifecycle, reports device metadata, and records peak resource use.
 
-### Current status (W1-W3)
+### Current status (W1-W5)
 
 - W1 remains open. The repository does not contain the approved production model-object
   generations/checksums, source revisions and patch hashes, license/provenance approvals, or the
@@ -703,31 +703,48 @@ Verify:
   records immutable cache metadata. The stage lifecycle permits each stage to initialize once
   before release. No production loader factory, model object, GPU smoke test, or Batch run exists
   until W1 supplies approved artifact locations, checksums, source revisions, and licenses.
+- W4's local orchestration implementation is complete against a deterministic, test-only reference
+  executor. It exercises decoded input through safety-gated inpainting, writes the documented
+  artifacts and structured results, and keeps the production CLI fail-closed when no real executor
+  is injected. Production model binding and private quality evaluation remain follow-up acceptance
+  work after W1 and W3.
+- W5's local batching and resumability implementation is complete. Integration tests cover a
+  five-item batch, corrupt-item isolation, per-item checkpointing, interrupted execution, partial
+  replay, and a subsequent replay with zero model-stage calls. GCS execution remains W6 scope.
 
-### W4. Extract one complete local pipeline path
+### [x] W4. Extract one complete local pipeline path
 
-Acceptance:
+Implementation acceptance:
 
-- One image runs from decoded input through final inpainting.
-- Artifacts match the documented local output contract.
-- Per-item failures are structured.
+- [x] One image runs from decoded input through final inpainting using an injected reference
+  executor.
+- [x] Artifacts match the documented local output contract.
+- [x] Per-item failures are structured.
+- [x] Reference stages are test-only; production execution remains fail-closed without an injected
+  executor.
+
+Deferred production acceptance:
+
+- [ ] Replace the reference executor with approved production stage loaders after W1 and W3.
+- [ ] Run the worker on the private evaluation set; assert expected decisions and manually review
+  all high-risk outputs.
+
+### [x] W5. Add batch iteration and resumability
+
+Implementation acceptance:
+
+- [x] A five-image manifest initializes each selected reference stage once.
+- [x] Completed items are validated and skipped on rerun.
+- [x] One corrupt image does not abort remaining items.
+- [x] An unverified safety gate blocks inpainting and leaves `finalUri` absent.
+- [x] Terminal item results are committed incrementally so interruption preserves completed work.
 
 Verify:
 
-- Run the worker on the private evaluation set; assert expected decisions and manually review all high-risk outputs.
-
-### W5. Add batch iteration and resumability
-
-Acceptance:
-
-- A five-image manifest initializes each selected model stage once.
-- Completed items are skipped on rerun.
-- One corrupt image does not abort remaining items.
-- An unverified safety gate blocks inpainting and leaves `finalUri` absent.
-
-Verify:
-
-- Interrupt and rerun a local batch; inspect result, terminal, and job markers.
+- [x] Interrupt and rerun a local batch; inspect result, terminal, and job markers.
+- [x] Replay the completed batch and assert that no reference stage runs again.
+- [ ] Repeat the five-image and interruption checks with approved production stages on the target
+  GPU after W1, W3, W7, and W8.
 
 ### W6. Add Cloud Storage adapter
 
