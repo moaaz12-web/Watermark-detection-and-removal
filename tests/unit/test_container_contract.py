@@ -10,6 +10,10 @@ def dockerfile() -> str:
 def test_container_uses_immutable_build_inputs_and_locked_runtime_dependencies() -> None:
     content = dockerfile()
 
+    assert content.startswith(
+        "# syntax=docker/dockerfile:1@sha256:"
+        "87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89"
+    )
     assert (
         "python:3.11.15-slim-trixie@sha256:"
         "00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045"

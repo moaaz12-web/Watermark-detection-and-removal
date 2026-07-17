@@ -77,7 +77,7 @@ def test_image_has_no_fixable_severe_vulnerabilities_or_embedded_secrets(
         "--exit-code",
         "1",
     ]
-    if configured_cache:
+    if os.environ.get("WM_TRIVY_SKIP_DB_UPDATE") == "1":
         scan_arguments.insert(-2, "--skip-db-update")
 
     docker(*scan_arguments)
