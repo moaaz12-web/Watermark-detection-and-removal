@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import yaml
@@ -54,8 +54,18 @@ class BackgroundRemovalConfig(StrictConfigModel):
     detector_input: Literal["white_background"]
     final_image_input: Literal["source_original"]
     model_artifact_id: ModelArtifactId
+    model_input_size: tuple[int, int]
 
     _artifact_id = field_validator("model_artifact_id")(_validate_artifact_id)
+
+    @field_validator("model_input_size")
+    @classmethod
+    def require_positive_model_input_size(
+        cls, value: tuple[int, int]
+    ) -> tuple[int, int]:
+        if any(dimension < 1 for dimension in value):
+            raise ValueError("model_input_size dimensions must be positive")
+        return value
 
 
 class YoloConfig(StrictConfigModel):
@@ -97,8 +107,21 @@ class DetectionConfig(StrictConfigModel):
 
 class SegmentationConfig(StrictConfigModel):
     model_artifact_id: ModelArtifactId
+    config_file: str = Field(min_length=1)
 
     _artifact_id = field_validator("model_artifact_id")(_validate_artifact_id)
+
+    @field_validator("config_file")
+    @classmethod
+    def require_safe_yaml_config_file(cls, value: str) -> str:
+        path = PurePosixPath(value)
+        if (
+            path.is_absolute()
+            or any(part in {"", ".", ".."} for part in path.parts)
+            or path.suffix not in {".yaml", ".yml"}
+        ):
+            raise ValueError("config_file must be a safe relative YAML path")
+        return value
 
 
 class SafetyGateConfig(StrictConfigModel):

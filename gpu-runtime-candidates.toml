@@ -1,0 +1,39 @@
+schema_version = 1
+status = "candidate-unverified"
+python = "3.11"
+cuda = "12.1"
+pytorch_index_url = "https://download.pytorch.org/whl/cu121"
+
+# This file records the first compatibility candidate only. Phase B must resolve a
+# hash-locked environment and prove it inside the GPU image before these become
+# production pins. It intentionally does not participate in the lightweight uv lock.
+[packages]
+torch = "2.5.1"
+torchvision = "0.20.1"
+transformers = "4.44.2"
+ultralytics-opencv-headless = "8.4.100"
+numpy = "1.26.4"
+scikit-image = "0.22.0"
+hydra-core = "1.3.2"
+omegaconf = "2.3.0"
+pytorch-lightning = "1.9.5"
+torchmetrics = "0.11.4"
+kornia = "0.7.4"
+albumentations = "1.3.1"
+imgaug = "0.4.0"
+easydict = "1.13"
+
+[sources.sam2]
+url = "https://github.com/facebookresearch/sam2.git"
+revision = "2b90b9f5ceec907a1c18123530e92e794ad901a4"
+
+[sources.lama]
+url = "https://github.com/advimman/lama.git"
+revision = "786f5936b27fb3dacd2b1ad799e4de968ea697e7"
+
+# The source identity available today is the checksum-pinned private RMBG bundle.
+# Its executable Python files must be extracted, reviewed, and packaged separately
+# before the production provider may load RMBG without trust_remote_code=True.
+[sources.rmbg]
+url = "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/rmbg/edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6/rmbg-1.4.tar"
+revision = "edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6"

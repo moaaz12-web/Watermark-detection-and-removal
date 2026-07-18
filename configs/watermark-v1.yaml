@@ -6,6 +6,7 @@ background_removal:
   detector_input: white_background
   final_image_input: source_original
   model_artifact_id: rmbg-edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6
+  model_input_size: [1024, 1024]
 
 detection:
   mode: combined
@@ -25,6 +26,7 @@ detection:
 
 segmentation:
   model_artifact_id: sam2-2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318
+  config_file: configs/sam2.1/sam2.1_hiera_l.yaml
 
 safety_gate:
   enabled: true

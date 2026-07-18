@@ -24,6 +24,7 @@ def write_worker_material(tmp_path: Path) -> tuple[Path, Path]:
             "detector_input": "white_background",
             "final_image_input": "source_original",
             "model_artifact_id": f"rmbg-{SHA_A}",
+            "model_input_size": [1024, 1024],
         },
         "detection": {
             "mode": "combined",
@@ -43,7 +44,10 @@ def write_worker_material(tmp_path: Path) -> tuple[Path, Path]:
                 "text_threshold": 0.55,
             },
         },
-        "segmentation": {"model_artifact_id": f"sam-{SHA_A}"},
+        "segmentation": {
+            "model_artifact_id": f"sam-{SHA_A}",
+            "config_file": "configs/sam2.1/sam2.1_hiera_l.yaml",
+        },
         "safety_gate": {
             "enabled": True,
             "failure_policy": "block_unverified",

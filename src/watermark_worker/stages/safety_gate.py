@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import BytesIO
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from watermark_worker.config import SafetyGateConfig
 from watermark_worker.contracts import SafetyDecision
@@ -11,45 +11,88 @@ from watermark_worker.contracts import SafetyDecision
 Pixel = tuple[int, int]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class BinaryMask:
-    """A validated binary image mask that does not depend on a GPU runtime."""
+    """A compact immutable binary image mask independent of the GPU runtime."""
 
     width: int
     height: int
-    pixels: frozenset[Pixel]
+    _data: bytes = field(repr=False)
 
-    def __post_init__(self) -> None:
-        if self.width < 1 or self.height < 1:
+    def __init__(self, width: int, height: int, pixels: frozenset[Pixel]) -> None:
+        self._validate_dimensions(width, height)
+        data = bytearray(width * height)
+        for x, y in pixels:
+            if x < 0 or y < 0 or x >= width or y >= height:
+                raise ValueError("mask pixel is outside mask dimensions")
+            data[y * width + x] = 255
+        object.__setattr__(self, "width", width)
+        object.__setattr__(self, "height", height)
+        object.__setattr__(self, "_data", bytes(data))
+
+    @classmethod
+    def from_image(cls, image: Image.Image, *, threshold: int = 0) -> BinaryMask:
+        """Copy and normalize an image into an immutable 0/255 raster."""
+        if threshold < 0 or threshold > 255:
+            raise ValueError("mask threshold must be between 0 and 255")
+        grayscale = image.convert("L")
+        normalized = grayscale.point(
+            tuple(255 if value > threshold else 0 for value in range(256))
+        )
+        width, height = normalized.size
+        return cls._from_data(width, height, normalized.tobytes())
+
+    @classmethod
+    def _from_data(cls, width: int, height: int, data: bytes) -> BinaryMask:
+        cls._validate_dimensions(width, height)
+        if len(data) != width * height:
+            raise ValueError("mask raster length does not match mask dimensions")
+        instance = object.__new__(cls)
+        object.__setattr__(instance, "width", width)
+        object.__setattr__(instance, "height", height)
+        object.__setattr__(instance, "_data", data)
+        return instance
+
+    @staticmethod
+    def _validate_dimensions(width: int, height: int) -> None:
+        if width < 1 or height < 1:
             raise ValueError("mask dimensions must be positive")
-        if any(x < 0 or y < 0 or x >= self.width or y >= self.height for x, y in self.pixels):
-            raise ValueError("mask pixel is outside mask dimensions")
+
+    @property
+    def pixels(self) -> frozenset[Pixel]:
+        """Materialize active coordinates for compatibility and small-mask tooling."""
+        return frozenset(
+            (index % self.width, index // self.width)
+            for index, value in enumerate(self._data)
+            if value
+        )
+
+    @property
+    def storage_bytes(self) -> int:
+        return len(self._data)
 
     @property
     def area(self) -> int:
-        return len(self.pixels)
+        return self._data.count(255)
 
     def union(self, *others: BinaryMask) -> BinaryMask:
-        pixels = set(self.pixels)
+        combined = self.to_image()
         for other in others:
             self._require_same_shape(other)
-            pixels.update(other.pixels)
-        return BinaryMask(width=self.width, height=self.height, pixels=frozenset(pixels))
+            combined = ImageChops.lighter(combined, other.to_image())
+        return BinaryMask._from_data(self.width, self.height, combined.tobytes())
 
     def overlap_area(self, other: BinaryMask) -> int:
         self._require_same_shape(other)
-        return len(self.pixels & other.pixels)
+        overlap = ImageChops.darker(self.to_image(), other.to_image())
+        return overlap.tobytes().count(255)
+
+    def to_image(self) -> Image.Image:
+        return Image.frombytes("L", (self.width, self.height), self._data)
 
     def to_png_bytes(self) -> bytes:
-        image = Image.new("L", (self.width, self.height), 0)
-        pixels = [
-            255 if (x, y) in self.pixels else 0
-            for y in range(self.height)
-            for x in range(self.width)
-        ]
-        image.putdata(pixels)
         buffer = BytesIO()
-        image.save(buffer, format="PNG")
+        self.to_image().save(buffer, format="PNG")
         return buffer.getvalue()
 
     def _require_same_shape(self, other: BinaryMask) -> None:

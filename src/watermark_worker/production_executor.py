@@ -8,6 +8,7 @@ from watermark_worker.config import (
     DetectionConfig,
     InpaintingConfig,
     PipelineConfig,
+    SegmentationConfig,
 )
 from watermark_worker.errors import ModelValidationError
 from watermark_worker.model_bundles import PreparedModelArtifact
@@ -58,6 +59,7 @@ class ProductionRuntimeProvider(Protocol):
         self,
         artifacts: DetectionModelArtifacts,
         config: DetectionConfig,
+        segmentation_config: SegmentationConfig,
     ) -> DetectionRuntime: ...
 
     def load_inpainting(
@@ -118,7 +120,7 @@ def build_production_executor(
         ),
         detection=ProductionDetectionStage(
             lambda: runtime_provider.load_detection(
-                detection_artifacts, config.detection
+                detection_artifacts, config.detection, config.segmentation
             )
         ),
         inpainting=ProductionInpaintingStage(

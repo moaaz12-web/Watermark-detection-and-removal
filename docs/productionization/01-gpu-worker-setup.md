@@ -417,7 +417,12 @@ Avoid abstractions that are not required by pipeline version 1. Each stage bound
 - Do not clone repositories during job execution.
 - Pin upstream source dependencies to released packages or specific commit SHAs during image build.
 - Preserve required LaMa compatibility changes as reviewed patches or maintained source, with tests that fail if an upstream layout changes.
-- Do not use Hugging Face `trust_remote_code=True` or download executable model code at worker startup. Vendor or package reviewed custom model code in the image, pinned to a reviewed source revision.
+- Do not download executable model code from a model provider during worker startup.
+- Setup-stage RMBG exception: `trust_remote_code=True` is allowed only with
+  `local_files_only=True` against the already downloaded and extracted RMBG bundle. That bundle is
+  pinned by its private GCS object generation and SHA-256 manifest identity before extraction. If
+  the custom source is absent from the verified bundle, model loading must fail rather than access
+  the network. See [ADR-003](../decisions/ADR-003-local-verified-rmbg-code.md).
 
 ### Model files
 
@@ -692,10 +697,29 @@ Local implementation checkpoint (2026-07-18):
 - Dependency-light production stage adapters and their artifact outputs are locally tested with
   in-memory runtime fakes. They preserve the original source as the sole LaMa image input and apply
   the notebook's threshold `127` and two-pixel mask dilation.
-- The actual PyTorch/Transformers/Ultralytics/SAM 2/LaMa runtime-provider implementations and their
-  reviewed source packaging are deliberately not claimed complete. Per operator direction, this
-  checkpoint did not install those dependencies, download models, start or rent a GPU, submit a
-  Batch job, or run the GPU smoke test.
+- Phase A implementation now includes a local-only GPU provider and adapters for RMBG tensor
+  preprocessing/compositing, combined GroundingDINO and YOLO box detection, one-pass SAM 2 box
+  segmentation, and in-process LaMa inference. Heavy modules are imported only when a runtime is
+  loaded. GroundingDINO uses `local_files_only=True`; all model paths come from checksum-verified,
+  prepared artifacts. CUDA availability is checked once before a provider can be used, and each
+  lifecycle stage explicitly releases its model references and CUDA allocator/IPC memory.
+- The binary safety mask uses an immutable one-byte-per-pixel raster. This bounds a 16-megapixel
+  mask at about 16 MB of mask payload instead of representing millions of Python coordinate tuples.
+- `gpu-runtime-candidates.toml` records exact candidate versions for the future GPU image and pins
+  the SAM 2 and LaMa source revisions to immutable commit SHAs. It is deliberately marked
+  `candidate-unverified`: it is not part of `uv.lock` and must not be treated as a release lock until
+  the dependencies have been resolved, hash-locked, built, and exercised in the GPU image.
+- The RMBG runtime uses Transformers with `local_files_only=True` and `trust_remote_code=True`
+  against the checksum-verified, generation-pinned local bundle. This preserves the notebook's
+  custom-model loading behavior without permitting a runtime network fetch. A dependency-light
+  test fixes both flags as part of the loader contract.
+- The LaMa adapter expects the commit-pinned `saicinpainting` package to already exist in the image;
+  the source has not yet been vendored and its required compatibility patch has not yet been
+  recorded and tested. For that reason, the production CLI remains fail-closed instead of
+  automatically constructing the provider.
+- Per operator direction, this checkpoint did not install PyTorch, Transformers, Ultralytics,
+  SAM 2, LaMa, or their transitive dependencies; download model files; connect to a GPU; start or
+  rent a GPU; submit a Batch job; or run the GPU smoke test.
 
 ### Current status (W1-W7)
 
@@ -710,12 +734,15 @@ Local implementation checkpoint (2026-07-18):
   `finalUri`; it intentionally does not load models or run inference. Unit and integration tests
   cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched
   manifest execution.
-- W3 has a tested, dependency-light implementation foundation but remains open. Enabled artifacts
-  stream from pinned GCS generations into a checksum-validated cache; safe bundle preparation,
-  typed runtime-provider assembly, lazy production stage adapters, sequential release, and the
-  no-LaMa-on-blocked path are covered by local tests. The concrete heavyweight runtime provider,
-  reviewed RMBG/LaMa source packaging, CUDA container verification, resource measurements, and GPU
-  smoke test remain outstanding. No GPU or Batch operation was performed for this checkpoint.
+- W3 has a tested local implementation foundation but remains open. Enabled artifacts stream from
+  pinned GCS generations into a checksum-validated cache; safe bundle preparation, compact safety
+  masks, CUDA preflight, typed local runtime-provider assembly, lazy production stage adapters,
+  sequential release, and the no-LaMa-on-blocked path are covered by dependency-light tests. The
+  RMBG source-vendoring requirement is intentionally deferred under ADR-003. The candidate GPU
+  dependency set still needs resolution and lock hashes; commit-pinned LaMa source and its patch
+  still need to be packaged; the production CLI still needs final provider assembly; and the
+  provider still needs container and real-GPU verification, resource measurements, and its
+  prohibited-for-now GPU smoke test. No GPU or Batch operation was performed for this checkpoint.
 - W4's local orchestration implementation is complete against a deterministic, test-only reference
   executor. It exercises decoded input through safety-gated inpainting, writes the documented
   artifacts and structured results, and keeps the production CLI fail-closed when no real executor

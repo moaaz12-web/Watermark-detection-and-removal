@@ -27,6 +27,7 @@ def config_payload() -> dict[str, object]:
             "detector_input": "white_background",
             "final_image_input": "source_original",
             "model_artifact_id": f"rmbg-{SHA_A}",
+            "model_input_size": [1024, 1024],
         },
         "detection": {
             "mode": "combined",
@@ -46,7 +47,10 @@ def config_payload() -> dict[str, object]:
                 "text_threshold": 0.55,
             },
         },
-        "segmentation": {"model_artifact_id": f"sam-{SHA_A}"},
+        "segmentation": {
+            "model_artifact_id": f"sam-{SHA_A}",
+            "config_file": "configs/sam2.1/sam2.1_hiera_l.yaml",
+        },
         "safety_gate": {
             "enabled": True,
             "failure_policy": "block_unverified",
@@ -112,6 +116,32 @@ def test_config_rejects_rmbg_as_final_inpainting_input(tmp_path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(InvalidConfigurationError, match="source_original"):
+        load_pipeline_config(path)
+
+
+def test_config_rejects_invalid_rmbg_model_input_size(tmp_path: Path) -> None:
+    payload = config_payload()
+    payload["background_removal"]["model_input_size"] = [1024, 0]  # type: ignore[index]
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(InvalidConfigurationError, match="model_input_size"):
+        load_pipeline_config(path)
+
+
+@pytest.mark.parametrize(
+    "config_file",
+    ["../sam2.1_hiera_l.yaml", "/configs/sam2.1_hiera_l.yaml", "sam2.1_hiera_l.json"],
+)
+def test_config_rejects_unsafe_sam2_config_path(
+    tmp_path: Path, config_file: str
+) -> None:
+    payload = config_payload()
+    payload["segmentation"]["config_file"] = config_file  # type: ignore[index]
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(InvalidConfigurationError, match="config_file"):
         load_pipeline_config(path)
 
 
@@ -203,6 +233,10 @@ def test_frozen_pipeline_v1_matches_its_model_manifest() -> None:
     assert loaded_config.config.detection.mode == "combined"
     assert loaded_config.config.detection.yolo.enabled is True
     assert loaded_config.config.detection.grounding_dino.enabled is True
+    assert loaded_config.config.background_removal.model_input_size == (1024, 1024)
+    assert loaded_config.config.segmentation.config_file == (
+        "configs/sam2.1/sam2.1_hiera_l.yaml"
+    )
     assert loaded_config.config.limits.maximum_items == 5
     assert loaded_config.config.storage.output_bucket == (
         "project-5909a738-2fdc-451e-ad6-watermark-data"

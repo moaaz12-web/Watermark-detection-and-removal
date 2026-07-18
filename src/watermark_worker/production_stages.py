@@ -192,7 +192,7 @@ class ProductionInpaintingStage:
         original = source.convert("RGB")
         if original.size != (approved_mask.width, approved_mask.height):
             raise ModelValidationError("approved mask dimensions do not match the source image")
-        mask = Image.open(BytesIO(approved_mask.to_png_bytes())).convert("L")
+        mask = approved_mask.to_image()
         mask = mask.point(lambda value: 255 if value > self.config.mask_threshold else 0)
         if self.config.mask_dilation_pixels:
             kernel = self.config.mask_dilation_pixels * 2 + 1
@@ -217,15 +217,7 @@ class ProductionInpaintingStage:
 
 
 def _binary_mask(image: Image.Image) -> BinaryMask:
-    grayscale = image.convert("L")
-    width, height = grayscale.size
-    read_pixels = getattr(grayscale, "get_flattened_data", grayscale.getdata)
-    pixels = frozenset(
-        (index % width, index // width)
-        for index, value in enumerate(read_pixels())
-        if int(value) > 0
-    )
-    return BinaryMask(width=width, height=height, pixels=pixels)
+    return BinaryMask.from_image(image)
 
 
 def _png_bytes(image: Image.Image) -> bytes:

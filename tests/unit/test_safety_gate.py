@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from PIL import Image
+
 from watermark_worker.config import SafetyGateConfig
 from watermark_worker.contracts import SafetyDecision
 from watermark_worker.stages.safety_gate import BinaryMask, evaluate_safety_gate
@@ -17,6 +19,30 @@ def gate_config() -> SafetyGateConfig:
         combined_warn=0.25,
         combined_block=0.55,
         min_product_area_pixels=3,
+    )
+
+
+def test_binary_mask_uses_compact_immutable_raster_storage() -> None:
+    image = Image.new("L", (128, 64), 255)
+
+    dense = BinaryMask.from_image(image)
+    image.putpixel((0, 0), 0)
+
+    assert dense.area == 128 * 64
+    assert dense.storage_bytes == 128 * 64
+    assert dense.to_image().getpixel((0, 0)) == 255
+
+
+def test_binary_mask_from_image_normalizes_nonzero_pixels() -> None:
+    image = Image.new("L", (2, 2), 0)
+    image.putdata([0, 1, 127, 255])
+
+    normalized = BinaryMask.from_image(image)
+
+    assert normalized == BinaryMask(
+        width=2,
+        height=2,
+        pixels=frozenset({(1, 0), (0, 1), (1, 1)}),
     )
 
 

@@ -9,6 +9,7 @@ from watermark_worker.config import (
     BackgroundRemovalConfig,
     DetectionConfig,
     InpaintingConfig,
+    SegmentationConfig,
     load_pipeline_config,
 )
 from watermark_worker.model_bundles import PreparedModelArtifact
@@ -104,6 +105,7 @@ class RecordingRuntimeProvider:
         self,
         artifacts: DetectionModelArtifacts,
         config: DetectionConfig,
+        segmentation_config: SegmentationConfig,
     ) -> FakeDetectionRuntime:
         self.loaded.append("detection")
         self.detection_artifacts = artifacts
