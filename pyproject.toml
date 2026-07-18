@@ -27,7 +27,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/watermark_worker", "src/saicinpainting"]
+packages = ["src/watermark_worker", "src/saicinpainting", "src/sam2"]
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
@@ -40,7 +40,7 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["*.ipynb", "src/saicinpainting"]
+extend-exclude = ["*.ipynb", "src/saicinpainting", "src/sam2"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]

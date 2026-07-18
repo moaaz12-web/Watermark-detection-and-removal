@@ -6,6 +6,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CANDIDATES_PATH = PROJECT_ROOT / "gpu-runtime-candidates.toml"
+GPU_REQUIREMENTS_PATH = PROJECT_ROOT / "requirements-gpu.in"
 
 
 def test_gpu_runtime_candidates_are_exact_and_immutable() -> None:
@@ -40,3 +41,26 @@ def test_lightweight_project_does_not_include_gpu_candidates() -> None:
 
     for heavyweight in ("torch", "transformers", "ultralytics", "sam2"):
         assert heavyweight not in lightweight.lower()
+
+
+def test_gpu_requirements_input_covers_the_selected_runtime_only() -> None:
+    requirements = GPU_REQUIREMENTS_PATH.read_text(encoding="utf-8").lower()
+
+    candidates = tomllib.loads(CANDIDATES_PATH.read_text(encoding="utf-8"))
+    for package, version in candidates["packages"].items():
+        assert f"{package}=={version}" in requirements
+
+    for required_runtime in (
+        "google-cloud-storage",
+        "pillow",
+        "pydantic",
+        "pyyaml",
+        "iopath",
+        "tqdm",
+        "pandas",
+    ):
+        assert required_runtime in requirements
+
+    assert "owlv2" not in requirements
+    assert "requirements-gpu.lock" in requirements
+    assert "--generate-hashes" in requirements

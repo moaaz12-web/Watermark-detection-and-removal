@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+
+# Task 4 must supply a reviewed Linux AMD64 Python 3.11 CUDA/PyTorch image by digest.
+# Example shape: --build-arg GPU_BASE_IMAGE=repository/image:tag@sha256:<digest>
+ARG GPU_BASE_IMAGE
+
+FROM ${GPU_BASE_IMAGE} AS builder
+
+COPY --from=ghcr.io/astral-sh/uv@sha256:f8f31ad675ac1a6e17ccabe0e5bbb7fe941b2a27f38cb509c799870570b2f1a7 /uv /uvx /bin/
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    SAM2_BUILD_CUDA=0
+
+WORKDIR /app
+COPY requirements-gpu.lock ./
+RUN uv venv --python python /app/.venv \
+    && uv pip sync --python /app/.venv/bin/python --require-hashes requirements-gpu.lock
+
+FROM ${GPU_BASE_IMAGE} AS runtime
+
+ENV HOME=/home/watermark-worker \
+    PATH=/app/.venv/bin:$PATH \
+    PYTHONPATH=/app/src \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TMPDIR=/tmp/watermark-worker \
+    WM_MODEL_WORK_ROOT=/tmp/watermark-worker/models \
+    SAM2_BUILD_CUDA=0
+
+RUN groupadd --gid 10001 watermark-worker \
+    && useradd --uid 10001 --gid 10001 --create-home \
+        --home-dir /home/watermark-worker watermark-worker \
+    && mkdir -p /tmp/watermark-worker/models \
+    && chown -R 10001:10001 /tmp/watermark-worker
+
+WORKDIR /app
+COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv
+COPY --chown=10001:10001 src ./src
+
+USER 10001:10001
+ENTRYPOINT ["python", "-m", "watermark_worker"]

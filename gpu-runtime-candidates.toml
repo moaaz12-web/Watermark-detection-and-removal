@@ -26,6 +26,7 @@ easydict = "1.13"
 [sources.sam2]
 url = "https://github.com/facebookresearch/sam2.git"
 revision = "2b90b9f5ceec907a1c18123530e92e794ad901a4"
+packaging = "vendored under src/sam2 without the optional CUDA extension"
 
 [sources.lama]
 url = "https://github.com/advimman/lama.git"

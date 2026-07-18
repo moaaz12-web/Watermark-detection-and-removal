@@ -718,14 +718,25 @@ Local implementation checkpoint (2026-07-18):
   maintained checkpoint patch explicitly passes `weights_only=False` for the trusted,
   checksum-verified checkpoint and falls back for older PyTorch call signatures. Tests preserve
   the revision, license, wheel inclusion, and patch contract.
+- Phase B local preparation packages the SAM 2 Python runtime and YAML configurations from commit
+  `2b90b9f5ceec907a1c18123530e92e794ad901a4` under `src/sam2`, with its Apache-2.0 license and
+  provenance. The optional CUDA extension is excluded, matching the notebook's
+  `SAM2_BUILD_CUDA=0` setup; the checkpoint remains a generation-pinned GCS artifact.
+- `requirements-gpu.in` contains the direct Linux AMD64/Python 3.11/CUDA 12.1 compatibility
+  candidates. It is not a release lock. Task 4 must resolve `requirements-gpu.lock` with hashes on
+  the remote builder and verify the resulting imports before the candidate status can change.
+- `Dockerfile.gpu` is the fail-closed GPU image recipe. It has no default base image and consumes
+  the intentionally absent `requirements-gpu.lock`, so it cannot be built accidentally before
+  Task 4 supplies a reviewed digest-pinned CUDA/PyTorch base and the generated lock. It packages
+  source but no model weights, installs no code at runtime, and runs as UID/GID 10001.
 - When inference is requested without an injected test executor, the CLI now assembles the
   production executor from the generation-pinned model cache, safe bundle cache, and local GPU
   provider. Assembly occurs only when at least one valid, incomplete item needs inference;
   validation-only runs, corrupt-only batches, and completed replays do not import GPU dependencies
   or materialize models. `WM_MODEL_WORK_ROOT` can override the model cache root; otherwise it uses
   `$TMPDIR/models`.
-- Phase A code-level implementation is complete. The candidate GPU dependency set deliberately
-  remains outside the lightweight lock until Phase B resolves and tests it in the GPU image.
+- Phase A and Phase B Tasks 1-3 are complete. The candidate GPU dependency set deliberately remains
+  outside the lightweight lock until Task 4 resolves and tests it in the GPU image.
 - Per operator direction, this checkpoint did not install PyTorch, Transformers, Ultralytics,
   SAM 2, LaMa, or their transitive dependencies; download model files; connect to a GPU; start or
   rent a GPU; submit a Batch job; or run the GPU smoke test.
@@ -743,15 +754,16 @@ Local implementation checkpoint (2026-07-18):
   `finalUri`; it intentionally does not load models or run inference. Unit and integration tests
   cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched
   manifest execution.
-- W3's Phase A code-level implementation is complete, but W3 remains open until its GPU acceptance
-  checks pass. Enabled artifacts stream from
+- W3's Phase A code-level implementation and Phase B local preparation Tasks 1-3 are complete, but
+  W3 remains open until its image and GPU acceptance checks pass. Enabled artifacts stream from
   pinned GCS generations into a checksum-validated cache; safe bundle preparation, compact safety
   masks, CUDA preflight, typed local runtime-provider assembly, lazy production stage adapters,
   sequential release, and the no-LaMa-on-blocked path are covered by dependency-light tests. The
   RMBG source-vendoring requirement is intentionally deferred under ADR-003. The candidate GPU
-  dependency set still needs Phase B resolution and lock hashes. The provider still needs GPU-image
-  dependency verification, resource measurements, and its prohibited-for-now GPU smoke test. No
-  GPU or Batch operation was performed for this checkpoint.
+  dependency input and fail-closed GPU Dockerfile are committed locally, while the final lock
+  hashes, reviewed base-image digest, remote image build, import verification, scan, and immutable
+  image digest remain Task 4. The provider still needs resource measurements and its
+  prohibited-for-now GPU smoke test. No GPU or Batch operation was performed for this checkpoint.
 - W4's local orchestration implementation is complete against a deterministic, test-only reference
   executor. It exercises decoded input through safety-gated inpainting, writes the documented
   artifacts and structured results. The production CLI now assembles the real local provider when

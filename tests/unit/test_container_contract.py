@@ -7,6 +7,10 @@ def dockerfile() -> str:
     return Path("Dockerfile").read_text(encoding="utf-8")
 
 
+def gpu_dockerfile() -> str:
+    return Path("Dockerfile.gpu").read_text(encoding="utf-8")
+
+
 def test_container_uses_immutable_build_inputs_and_locked_runtime_dependencies() -> None:
     content = dockerfile()
 
@@ -39,3 +43,38 @@ def test_container_never_fetches_executable_code_at_runtime() -> None:
     assert "curl " not in content
     assert "wget " not in content
     assert "trust_remote_code" not in content
+
+
+def test_gpu_container_requires_phase_b_immutable_build_inputs() -> None:
+    content = gpu_dockerfile()
+
+    assert content.startswith(
+        "# syntax=docker/dockerfile:1@sha256:"
+        "87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89"
+    )
+    assert "ARG GPU_BASE_IMAGE" in content
+    assert "ARG GPU_BASE_IMAGE=" not in content
+    assert "FROM ${GPU_BASE_IMAGE}" in content
+    assert "requirements-gpu.lock" in content
+    assert "uv pip sync" in content
+    assert "--require-hashes" in content
+    assert "SAM2_BUILD_CUDA=0" in content
+
+
+def test_gpu_container_packages_source_without_models_or_runtime_fetches() -> None:
+    content = gpu_dockerfile()
+
+    assert "src ./src" in content
+    assert "sam2.1_hiera_large.pt" not in content
+    assert "yolo11x-train28-best.pt" not in content
+    assert "big-lama.zip" not in content
+    assert "git clone" not in content
+    assert "curl " not in content
+    assert "wget " not in content
+
+
+def test_gpu_container_runs_the_worker_as_non_root() -> None:
+    content = gpu_dockerfile()
+
+    assert "USER 10001:10001" in content
+    assert 'ENTRYPOINT ["python", "-m", "watermark_worker"]' in content

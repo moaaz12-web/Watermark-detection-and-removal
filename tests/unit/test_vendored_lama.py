@@ -37,4 +37,5 @@ def test_vendored_lama_is_included_in_the_worker_wheel() -> None:
     assert pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
         "src/watermark_worker",
         "src/saicinpainting",
+        "src/sam2",
     ]
