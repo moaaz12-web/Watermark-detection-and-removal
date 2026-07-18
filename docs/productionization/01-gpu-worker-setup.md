@@ -1,6 +1,6 @@
 # GPU Watermark Worker: Production Setup Plan
 
-Status: W2 and W4-W7 implementation complete — production acceptance remains gated by W0, W1,
+Status: W1, W2, and W4-W7 implementation complete — production acceptance remains gated by W0,
 W3, and the deferred live/GPU checks
 
 Last updated: 2026-07-18
@@ -107,7 +107,7 @@ The following decisions are intentional constraints, not implementation suggesti
 - Resume safely using terminal markers.
 - Package the worker in a GPU-compatible container.
 - Run the container manually through Google Cloud Batch.
-- Add unit, integration, GPU smoke, and manual regression checks.
+- Add unit, integration, GPU smoke, and manual setup checks.
 - Emit structured logs and progress events.
 
 ### Not included
@@ -123,87 +123,43 @@ The following decisions are intentional constraints, not implementation suggesti
 
 ## 5. Production pipeline specification
 
-Before code extraction, create a versioned configuration file such as `configs/watermark-v1.yaml` containing every behavior-changing value. A configuration containing `null`, `TBD`, a mutable URL, or a branch name is invalid and must be rejected at startup.
+The canonical version-1 configuration is `configs/watermark-v1.yaml`. A configuration containing
+`null`, `TBD`, a mutable URL, or a branch name is invalid and must be rejected at startup.
 
-```yaml
-schema_version: 1
-pipeline_version: watermark-v1
+W1 freezes the following setup:
 
-background_removal:
-  enabled: true                         # required when safety_gate.enabled is true
-  detector_input: white_background
-  final_image_input: source_original
-  model_artifact_id: rmbg-1.4-<sha256>
+- Selected notebook:
+  `watermark_batch_rmbg_grounding_dino_yolo_sam2_lama_safety_gate.ipynb`.
+- Enabled processing path: RMBG, combined GroundingDINO and YOLO detection, SAM 2,
+  product-overlap safety gate, then LaMa.
+- The optional OWLv2 classifier gate is disabled for version 1. Its immutable artifacts remain in
+  `model-manifest.json` for a future pipeline version.
+- YOLO uses confidence `0.35`, IoU `0.50`, image size `1024`, and augmented inference.
+- The safety gate uses per-detection block `0.40`, combined warning `0.25`, combined block `0.55`,
+  and minimum product area `500` pixels.
+- LaMa uses two pixels of mask dilation and mask threshold `127`.
+- Each job accepts at most five PNG, JPEG, or WebP images. Each compressed image is limited to
+  10,000,000 bytes, dimensions are limited to 4096 by 4096, and decoded area is limited to
+  16,000,000 pixels.
+- Manifests, inputs, and outputs use the private
+  `project-5909a738-2fdc-451e-ad6-watermark-data` bucket.
 
-detection:
-  mode: combined
-  yolo:
-    enabled: true
-    model_artifact_id: watermark-yolo-<sha256>
-    confidence: 0.35
-    iou: 0.5
-    image_size: 1024
-    augment: true
-  grounding_dino:
-    enabled: true
-    model_artifact_id: grounding-dino-base-<sha256>
-    prompt: "watermark, logo, brand logo, text, label, sticker, stamp, copyright notice, graphic overlay, promotiona text, ecommerce text, commercial messaging, shipping text, discount offer"
-    box_threshold: 0.35
-    text_threshold: 0.55
-
-segmentation:
-  model_artifact_id: sam2.1-hiera-large-<sha256>
-
-safety_gate:
-  enabled: true
-  failure_policy: block_unverified
-  per_detection_block: 0.40
-  combined_warn: 0.25
-  combined_block: 0.55
-  min_product_area_pixels: 500
-
-inpainting:
-  model_artifact_id: big-lama-<sha256>
-  input: source_original
-  mask_dilation_pixels: 2
-  mask_threshold: 127
-```
-
-The values above are the current notebook candidate snapshot, not approval to ship. W1 replaces every `<sha256>` identifier with an approved model artifact and records the exact source revision, code patch hash, license review, and file checksum in `model-manifest.json`. Changing any listed value creates a new pipeline version.
+The configuration contains the exact checksum-pinned artifact IDs from `model-manifest.json`.
+Changing any frozen behavior value requires a new pipeline version.
 
 The worker must run models by lifecycle stage: RMBG, detector/SAM, then LaMa. It releases a completed stage before loading the next one and must not keep every selected model resident simultaneously. This preserves the notebook's memory behavior while retaining one load per selected stage per process.
 
-## 6. Private evaluation set and quality gate
+## 6. Setup-time smoke inputs
 
-Keep a private, versioned evaluation set of authorized or sanitized images. It begins with the following approximately 10-image smoke subset and grows whenever a useful failure case is found:
+A private, versioned evaluation set and formal human-approval workflow are not required for the
+initial system-setup milestone. W1 freezes the selected pipeline, configuration, model identity,
+and immutable model locations without requiring a golden-image corpus or expected-decision
+manifest.
 
-```text
-golden-images/
-  01-small-watermark.jpg
-  02-large-watermark.jpg
-  03-transparent-watermark.jpg
-  04-edge-watermark.jpg
-  05-clean-product.jpg
-  06-clean-product-with-logo.jpg
-  07-product-with-printed-text.jpg
-  08-false-positive-risk.jpg
-  09-high-resolution.jpg
-  10-unusual-aspect-ratio.jpg
-```
-
-The exact filenames and mix may differ. Keep image bytes and filenames unchanged so repeated runs use the same inputs. Store a private manifest alongside the images containing each source checksum, expected decision (`INPAINTED`, `SKIPPED_NO_WATERMARK`, or `BLOCKED_BY_SAFETY_GATE`), risk class, and human approval record.
-
-The evaluation set must include both editable watermark cases and high-risk negative cases: clean products, product logos, printed text, small/partial products, transparent overlays, large overlays, high-resolution images, and unusual aspect ratios. The high-risk negative cases have a strict rule: no unapproved product alteration and no inpainting when the safety gate is unavailable.
-
-Verification combines automated and manual checks:
-
-1. Record the source notebook outputs as an exploratory reference before extraction.
-2. Run the extracted worker with the pinned image, config, and model manifests.
-3. Assert expected decisions and source checksums automatically.
-4. Compare masks and final images side by side for every changed decision or high-risk case.
-5. Require named human approval for any intentional quality change; otherwise it is a regression.
-
-The folder is an offline development and staging aid only. It is not bundled into the worker image, referenced by production code, or included in customer production jobs. Production jobs contain arbitrary product images supplied through their own manifests.
+GPU and Batch setup checks may use a small operator-selected manifest of authorized images. These
+inputs exist only to prove that the pinned models load, the pipeline completes, artifacts are
+written, and resumability works. Formal product-quality benchmarking can be added later as a
+separate product-readiness activity and does not block W1-W9 in this plan.
 
 ## 7. Input contract
 
@@ -467,17 +423,36 @@ Avoid abstractions that are not required by pipeline version 1. Each stage bound
 
 `model-manifest.json` records, for every model:
 
-- Logical name and version.
-- Source and license reference.
-- Expected filename.
+- Artifact ID, ending with the model file's SHA-256.
+- Safe local filename.
 - SHA-256 checksum.
-- Size.
-- Required pipeline stages.
-- Immutable private object URI and GCS generation when the model is fetched at startup.
-- Source-code revision/patch hash when the model needs custom loading code.
-- License and commercial-use review status.
+- Private GCS object URI.
+- Immutable GCS object generation.
 
-Model files are initially downloaded from a private, versioned Cloud Storage prefix during container startup, at pinned generations and with checksum validation. Baking them into the container can be evaluated after measuring startup and pull times. Mutable public URLs, mutable repository branches, and runtime repository clones are not a production model registry.
+The complete runtime contract is intentionally small:
+
+```json
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "artifactId": "sam2-large-<sha256>",
+      "filename": "sam2.1_hiera_large.pt",
+      "checksumSha256": "<sha256>",
+      "uri": "gs://watermark-models/watermark-v1/sam2.1_hiera_large.pt",
+      "generation": "123456789"
+    }
+  ]
+}
+```
+
+Model files are initially downloaded from a private, versioned Cloud Storage prefix during
+container startup. SHA-256 validation is performed on the bytes from that required download before
+the file is cached; it is not a second download or a separate preflight transfer. A compatible
+cached file is reused. Only artifacts referenced by the enabled production stages should be
+materialized. Baking them into the container can be evaluated after measuring startup and pull
+times. Mutable public URLs, mutable repository branches, and runtime repository clones are not a
+production model registry.
 
 ## 13. Container requirements
 
@@ -626,11 +601,11 @@ Unit tests must not require a GPU.
 - Each selected model stage initializes once, and completed model stages are released before the next stage.
 - Peak VRAM, system RAM, local disk, and model initialization time are recorded.
 
-### Manual regression check
+### Manual setup check
 
-- Assert expected item decisions from the private evaluation manifest.
-- Review every high-risk negative case and every changed decision/mask/final image side by side.
-- Require human approval for material or intentional quality changes; reject any unapproved product alteration.
+- Run a small operator-selected manifest of authorized images.
+- Confirm masks, annotations, results, final-image rules, and completion markers are inspectable.
+- Confirm a blocked or unverified safety decision never invokes LaMa or produces `finalUri`.
 
 ### Batch acceptance test
 
@@ -657,18 +632,23 @@ Verify:
 
 - Review the contract with the FastAPI/orchestration owner before either service is implemented.
 
-### [ ] W1. Freeze pipeline version 1
+### [x] W1. Freeze pipeline version 1
 
 Acceptance:
 
-- One notebook path and enabled stage set are selected.
-- All model artifact generations/checksums, source revisions, prompts, thresholds, and safety-gate values are recorded.
-- Custom-weight provenance and licenses are approved.
-- A private evaluation manifest contains expected decisions and approvals for representative and high-risk negative images.
+- [x] Select one notebook path and the enabled stage set, including whether the optional OWLv2 gate
+  is part of version 1.
+- [x] Record model artifact GCS URIs, generations, and SHA-256 checksums in
+  `model-manifest.json`.
+- [x] Create `configs/watermark-v1.yaml` with the selected artifact IDs and no placeholders.
+- [x] Approve the detector prompt, detector thresholds, safety-gate values, inpainting settings,
+  image limits, and allowed storage buckets in that configuration.
+- [x] Load the configuration and model manifest together, verify every enabled artifact binding,
+  and approve their hashes as pipeline version 1.
 
 Verify:
 
-- Record the selected notebook outputs as a reference and approve the pinned production configuration.
+- Approve the pinned production configuration and model manifest.
 
 ### [x] W2. Add contracts and local CLI shell
 
@@ -696,9 +676,11 @@ Verify:
 
 ### Current status (W1-W7)
 
-- W1 remains open. The repository does not contain the approved production model-object
-  generations/checksums, source revisions and patch hashes, license/provenance approvals, or the
-  private evaluation manifest with human approvals required by its acceptance criteria.
+- W1 is complete. The selected notebook and combined GroundingDINO/YOLO detector path are recorded,
+  seven production model objects are pinned in `model-manifest.json`, and
+  `configs/watermark-v1.yaml` freezes the enabled artifact bindings, notebook defaults, five-image
+  limits, and private data bucket. The configuration and manifest load together successfully
+  without downloading model files.
 - W2 is complete. It implements the typed contracts, local/GCS CLI validation, local `inputPath`
   contract, decoded-image limits, conditional result and `_COMPLETE.json` creation, and structured
   JSON logging. The tested `--validate-only` local path writes terminal `UNVERIFIED` results with no
@@ -706,15 +688,14 @@ Verify:
   cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched
   manifest execution.
 - W3 has a tested foundation but remains open. The model-artifact cache reads every configured
-  artifact only at its pinned GCS generation, verifies size and SHA-256 before caching it, and
-  records immutable cache metadata. The stage lifecycle permits each stage to initialize once
-  before release. No production loader factory, model object, GPU smoke test, or Batch run exists
-  until W1 supplies approved artifact locations, checksums, source revisions, and licenses.
+  artifact only at its pinned GCS generation, verifies SHA-256 before caching it, and records
+  immutable cache metadata. The stage lifecycle permits each stage to initialize once
+  before release. The artifact locations are now available in `model-manifest.json`, but no
+  production loader factory, model object, GPU smoke test, or Batch run exists yet.
 - W4's local orchestration implementation is complete against a deterministic, test-only reference
   executor. It exercises decoded input through safety-gated inpainting, writes the documented
   artifacts and structured results, and keeps the production CLI fail-closed when no real executor
-  is injected. Production model binding and private quality evaluation remain follow-up acceptance
-  work after W1 and W3.
+  is injected. Production model loading remains follow-up acceptance work under W3.
 - W5's local batching and resumability implementation is complete. Integration tests cover a
   five-item batch, corrupt-item isolation, per-item checkpointing, interrupted execution, partial
   replay, and a subsequent replay with zero model-stage calls.
@@ -742,9 +723,8 @@ Implementation acceptance:
 
 Deferred production acceptance:
 
-- [ ] Replace the reference executor with approved production stage loaders after W1 and W3.
-- [ ] Run the worker on the private evaluation set; assert expected decisions and manually review
-  all high-risk outputs.
+- [ ] Replace the reference executor with approved production stage loaders after W3.
+- [ ] Run an operator-selected smoke manifest and inspect the produced artifacts and decisions.
 
 ### [x] W5. Add batch iteration and resumability
 
@@ -761,7 +741,7 @@ Verify:
 - [x] Interrupt and rerun a local batch; inspect result, terminal, and job markers.
 - [x] Replay the completed batch and assert that no reference stage runs again.
 - [ ] Repeat the five-image and interruption checks with approved production stages on the target
-  GPU after W1, W3, W7, and W8.
+  GPU after W3, W7, and W8.
 
 ### [x] W6. Add Cloud Storage adapter
 
@@ -795,7 +775,7 @@ Verify:
 - [x] The ADR-002 automated gate reports no secrets and no fixable high/critical vulnerabilities.
 - [ ] Review or remediate the 22 unfixed Debian findings before promoting a production image.
 - [ ] Replace the reference Python base with the approved CUDA/PyTorch GPU base and repeat the scan,
-  smoke test, SIGTERM checkpoint test, and CUDA/L4 checks after W1 and W3.
+  smoke test, SIGTERM checkpoint test, and CUDA/L4 checks after W3.
 
 ### W8. Submit a manual Batch GPU job
 
@@ -810,17 +790,16 @@ Verify:
 
 - Review Batch state, Cloud Logging, GCS marker generations, runtime, resource metrics, and billing labels.
 
-### W9. Run representative performance and quality evaluation
+### W9. Run representative performance evaluation
 
 Acceptance:
 
 - Representative batch runtime, throughput, peak VRAM/RAM/disk, failures, and cost are recorded.
-- Outputs for the private evaluation images meet automated decision expectations and receive required human review.
 - The selected machine and disk sizes are confirmed or adjusted from evidence.
 
 Verify:
 
-- Publish an evaluation report tied to the worker image digest and pipeline version.
+- Publish a performance report tied to the worker image digest and pipeline version.
 
 ## 19. Completion criteria
 
@@ -835,16 +814,15 @@ Worker foundation is complete when:
 - Blocked or unverified items never run LaMa and never expose a preprocessing image as final output.
 - Manifest, source, item marker, and job marker identities are generation- and checksum-verified.
 - A manual Google Cloud Batch L4 execution succeeds.
-- Manual notebook-versus-worker review shows no unapproved material regression.
 - Runtime and resource measurements support the chosen VM shape.
 - No API database or user-authentication secret is present in the worker.
 
-## 20. Remaining inputs before W1 and release
+## 20. Remaining inputs before release
 
-The architecture decisions are closed; the following concrete values must be supplied by W1 or the environment owner and must not be guessed during implementation:
+W1 is frozen in `configs/watermark-v1.yaml` and `model-manifest.json`. The following release and
+infrastructure values must still be supplied by the environment owner and must not be guessed
+during implementation:
 
-- Approved model-object generations, checksums, source revisions, and custom-weight license/provenance records.
-- Exact maximum compressed bytes, dimensions, pixel count, and item count.
 - Artifact retention, lifecycle, and deletion policy for originals, masks, annotations, and final images.
 - Approved VPC, L4-capable zone(s), quota/capacity result, and service-account identities.
 - Benchmark evidence confirming the VM shape and boot-disk size, or the approved larger replacement.

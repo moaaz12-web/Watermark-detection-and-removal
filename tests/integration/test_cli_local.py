@@ -77,30 +77,17 @@ def write_worker_material(tmp_path: Path) -> tuple[Path, Path]:
         artifacts.append(
             {
                 "artifactId": f"{name}-{SHA_A}",
-                "logicalName": name,
-                "version": "test-1",
                 "filename": f"{name}.bin",
-                "sizeBytes": 1,
                 "checksumSha256": SHA_A,
                 "uri": f"gs://model-bucket/watermark-v1/{name}.bin",
                 "generation": "1",
-                "sourceRevision": "1" * 40,
-                "patches": [],
-                "license": {
-                    "identifier": "TEST-ONLY",
-                    "reference": "https://example.invalid/license",
-                    "commercialUseApproved": True,
-                    "approvedBy": "test",
-                    "approvedAt": "2026-07-17T10:00:00Z",
-                },
-                "provenance": {"source": "test", "reviewNotes": "test fixture"},
             }
         )
     config_path = tmp_path / "config.json"
     model_manifest_path = tmp_path / "model-manifest.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     model_manifest_path.write_text(
-        json.dumps({"schemaVersion": 1, "manifestVersion": "test", "artifacts": artifacts}),
+        json.dumps({"schemaVersion": 1, "artifacts": artifacts}),
         encoding="utf-8",
     )
     return config_path, model_manifest_path

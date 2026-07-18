@@ -46,4 +46,5 @@ Rejected. Invalid manifests, missing models, and permission failures are determi
 - Some images are blocked rather than automatically edited; this is deliberate and must be visible to users/operators through item status and review artifacts.
 - FastAPI and the orchestrator must pass pinned GCS generations, validate job completion markers, and treat output manifests as untrusted until validation succeeds.
 - The worker requires typed contracts for item outcomes, input identity, marker compatibility, and retry classification.
-- The private evaluation set must include high-risk negative examples and reject unapproved product alteration.
+- Formal product-quality evaluation is separate from the initial worker-setup milestone. Setup uses
+  operator-selected authorized smoke inputs while the runtime safety gate continues to fail closed.

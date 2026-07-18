@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "artifactId": "rmbg-edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6",
+      "filename": "rmbg-1.4.tar",
+      "checksumSha256": "edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/rmbg/edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6/rmbg-1.4.tar",
+      "generation": "1784373193705163"
+    },
+    {
+      "artifactId": "grounding-dino-c20fcbe1eaa4bb99377ae9a2746a10cb20a3c200772fdd4c423bd84643b7f77d",
+      "filename": "grounding-dino-base.tar",
+      "checksumSha256": "c20fcbe1eaa4bb99377ae9a2746a10cb20a3c200772fdd4c423bd84643b7f77d",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/grounding-dino/c20fcbe1eaa4bb99377ae9a2746a10cb20a3c200772fdd4c423bd84643b7f77d/grounding-dino-base.tar",
+      "generation": "1784373242618807"
+    },
+    {
+      "artifactId": "yolo-80b022e94239a65a3b50173096523f202ca39608b9063dd391d043323a51326e",
+      "filename": "yolo11x-train28-best.pt",
+      "checksumSha256": "80b022e94239a65a3b50173096523f202ca39608b9063dd391d043323a51326e",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/yolo/80b022e94239a65a3b50173096523f202ca39608b9063dd391d043323a51326e/yolo11x-train28-best.pt",
+      "generation": "1784373246216706"
+    },
+    {
+      "artifactId": "sam2-2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318",
+      "filename": "sam2.1_hiera_large.pt",
+      "checksumSha256": "2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/sam2/2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318/sam2.1_hiera_large.pt",
+      "generation": "1784373268769437"
+    },
+    {
+      "artifactId": "lama-f1b358ca24093b93a106183b98a3dea6e8ed09f3b43ea7251eb2c81e7b4575f6",
+      "filename": "big-lama.zip",
+      "checksumSha256": "f1b358ca24093b93a106183b98a3dea6e8ed09f3b43ea7251eb2c81e7b4575f6",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/lama/f1b358ca24093b93a106183b98a3dea6e8ed09f3b43ea7251eb2c81e7b4575f6/big-lama.zip",
+      "generation": "1784373278901049"
+    },
+    {
+      "artifactId": "owlv2-base-dea8e25fd7a324c6ccb3879bdf5dd03b823d5941c44386c14003e49fb745f536",
+      "filename": "owlv2-base-patch16-ensemble.tar",
+      "checksumSha256": "dea8e25fd7a324c6ccb3879bdf5dd03b823d5941c44386c14003e49fb745f536",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/owlv2-base/dea8e25fd7a324c6ccb3879bdf5dd03b823d5941c44386c14003e49fb745f536/owlv2-base-patch16-ensemble.tar",
+      "generation": "1784373311470702"
+    },
+    {
+      "artifactId": "owlv2-classifier-f600472e0bf8d8051046541230dd736bc862d5c964ff591b719abf7d80ed1835",
+      "filename": "far5y1y5-8000.pt",
+      "checksumSha256": "f600472e0bf8d8051046541230dd736bc862d5c964ff591b719abf7d80ed1835",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/owlv2-classifier/f600472e0bf8d8051046541230dd736bc862d5c964ff591b719abf7d80ed1835/far5y1y5-8000.pt",
+      "generation": "1784373320383747"
+    }
+  ]
+}

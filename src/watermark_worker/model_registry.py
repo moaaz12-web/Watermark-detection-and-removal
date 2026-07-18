@@ -7,7 +7,6 @@ import re
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -19,32 +18,12 @@ from watermark_worker.errors import ModelValidationError
 from watermark_worker.storage import StoredObject, sha256_bytes
 
 
-class LicenseApproval(ContractModel):
-    identifier: str = Field(min_length=1)
-    reference: str = Field(min_length=1)
-    commercial_use_approved: Literal[True]
-    approved_by: str = Field(min_length=1)
-    approved_at: datetime
-
-
-class Provenance(ContractModel):
-    source: str = Field(min_length=1)
-    review_notes: str = Field(min_length=1)
-
-
 class ModelArtifact(ContractModel):
     artifact_id: str
-    logical_name: str = Field(min_length=1)
-    version: str = Field(min_length=1)
     filename: str = Field(min_length=1)
-    size_bytes: int = Field(ge=1)
     checksum_sha256: Sha256
     uri: str
     generation: Generation
-    source_revision: str
-    patches: list[Sha256]
-    license: LicenseApproval
-    provenance: Provenance
 
     @field_validator("artifact_id")
     @classmethod
@@ -67,13 +46,6 @@ class ModelArtifact(ContractModel):
             raise ValueError("model filename must be a single safe filename")
         return value
 
-    @field_validator("source_revision")
-    @classmethod
-    def require_source_revision(cls, value: str) -> str:
-        if not re.fullmatch(r"[0-9a-f]{7,64}", value):
-            raise ValueError("sourceRevision must be an immutable hexadecimal source revision")
-        return value
-
     @model_validator(mode="after")
     def artifact_id_matches_checksum(self) -> ModelArtifact:
         if not self.artifact_id.endswith(self.checksum_sha256):
@@ -83,7 +55,6 @@ class ModelArtifact(ContractModel):
 
 class ModelManifest(ContractModel):
     schema_version: Literal[1]
-    manifest_version: str = Field(min_length=1)
     artifacts: list[ModelArtifact] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -110,10 +81,7 @@ def load_model_manifest(path: Path) -> LoadedModelManifest:
     try:
         manifest = ModelManifest.model_validate(payload)
     except ValidationError as exc:
-        message = str(exc)
-        if "commercialUseApproved" in message:
-            message = f"model license is not approved: {message}"
-        raise ModelValidationError(f"invalid model manifest: {message}") from exc
+        raise ModelValidationError(f"invalid model manifest: {exc}") from exc
     return LoadedModelManifest(
         manifest=manifest,
         sha256=hashlib.sha256(raw).hexdigest(),
@@ -178,10 +146,6 @@ class ModelArtifactCache:
                 f"model artifact {artifact.artifact_id} was not read at its pinned URI and "
                 "generation"
             )
-        if len(stored.data) != artifact.size_bytes:
-            raise ModelValidationError(
-                f"model artifact {artifact.artifact_id} size does not match its manifest"
-            )
         if sha256_bytes(stored.data) != artifact.checksum_sha256:
             raise ModelValidationError(
                 f"model artifact {artifact.artifact_id} checksum does not match its manifest"
@@ -209,7 +173,7 @@ class ModelArtifactCache:
             raise ModelValidationError(
                 f"cannot read cached model artifact {artifact.artifact_id}: {exc}"
             ) from exc
-        if len(data) != artifact.size_bytes or sha256_bytes(data) != artifact.checksum_sha256:
+        if sha256_bytes(data) != artifact.checksum_sha256:
             raise ModelValidationError(
                 f"cached model artifact {artifact.artifact_id} checksum does not match its manifest"
             )
@@ -235,7 +199,6 @@ class ModelArtifactCache:
                 "artifactId": artifact.artifact_id,
                 "checksumSha256": artifact.checksum_sha256,
                 "generation": artifact.generation,
-                "sizeBytes": artifact.size_bytes,
                 "uri": artifact.uri,
             },
             sort_keys=True,

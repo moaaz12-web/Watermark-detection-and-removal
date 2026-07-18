@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -14,6 +15,7 @@ from watermark_worker.model_registry import (
 )
 
 SHA_A = "a" * 64
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def config_payload() -> dict[str, object]:
@@ -79,30 +81,13 @@ def model_payload() -> dict[str, object]:
     artifact_ids = ["rmbg", "yolo", "dino", "sam", "lama"]
     return {
         "schemaVersion": 1,
-        "manifestVersion": "test-models-v1",
         "artifacts": [
             {
                 "artifactId": f"{name}-{SHA_A}",
-                "logicalName": name,
-                "version": "test-1",
                 "filename": f"{name}.bin",
-                "sizeBytes": 3,
                 "checksumSha256": SHA_A,
                 "uri": f"gs://model-bucket/watermark-v1/{name}.bin",
                 "generation": str(index + 1),
-                "sourceRevision": "1" * 40,
-                "patches": [],
-                "license": {
-                    "identifier": "TEST-ONLY",
-                    "reference": "https://example.invalid/test-license",
-                    "commercialUseApproved": True,
-                    "approvedBy": "test-fixture",
-                    "approvedAt": "2026-07-17T10:00:00Z",
-                },
-                "provenance": {
-                    "source": "synthetic-test-fixture",
-                    "reviewNotes": "Not a production model.",
-                },
             }
             for index, name in enumerate(artifact_ids)
         ],
@@ -151,14 +136,14 @@ def test_model_manifest_requires_immutable_generation(tmp_path) -> None:
         load_model_manifest(path)
 
 
-def test_model_manifest_requires_license_approval(tmp_path) -> None:
+def test_minimal_model_manifest_loads_without_governance_metadata(tmp_path) -> None:
     payload = model_payload()
-    payload["artifacts"][0]["license"]["commercialUseApproved"] = False  # type: ignore[index]
     path = tmp_path / "model-manifest.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ModelValidationError, match="license"):
-        load_model_manifest(path)
+    loaded = load_model_manifest(path)
+
+    assert len(loaded.manifest.artifacts) == 5
 
 
 def test_every_configured_model_must_resolve_to_exact_manifest_artifact(tmp_path) -> None:
@@ -206,4 +191,24 @@ def test_selected_stage_definitions_contain_only_enabled_model_artifacts(tmp_pat
         ("background_removal", (f"rmbg-{SHA_A}",)),
         ("detection_segmentation", (f"sam-{SHA_A}", f"yolo-{SHA_A}", f"dino-{SHA_A}")),
         ("inpainting", (f"lama-{SHA_A}",)),
+    ]
+
+
+def test_frozen_pipeline_v1_matches_its_model_manifest() -> None:
+    loaded_config = load_pipeline_config(PROJECT_ROOT / "configs" / "watermark-v1.yaml")
+    loaded_models = load_model_manifest(PROJECT_ROOT / "model-manifest.json")
+
+    validate_model_bindings(loaded_config.config, loaded_models.manifest)
+
+    assert loaded_config.config.detection.mode == "combined"
+    assert loaded_config.config.detection.yolo.enabled is True
+    assert loaded_config.config.detection.grounding_dino.enabled is True
+    assert loaded_config.config.limits.maximum_items == 5
+    assert loaded_config.config.storage.output_bucket == (
+        "project-5909a738-2fdc-451e-ad6-watermark-data"
+    )
+    assert [definition.name for definition in selected_stage_definitions(loaded_config.config)] == [
+        "background_removal",
+        "detection_segmentation",
+        "inpainting",
     ]

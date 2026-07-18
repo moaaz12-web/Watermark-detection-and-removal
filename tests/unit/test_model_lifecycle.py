@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -24,23 +23,10 @@ MODEL_SHA = sha256_bytes(MODEL_BYTES)
 def artifact() -> ModelArtifact:
     return ModelArtifact(
         artifact_id=f"rmbg-{MODEL_SHA}",
-        logical_name="rmbg",
-        version="1.4",
         filename="rmbg.bin",
-        size_bytes=len(MODEL_BYTES),
         checksum_sha256=MODEL_SHA,
         uri="gs://model-bucket/watermark-v1/rmbg.bin",
         generation="123",
-        source_revision="1" * 40,
-        patches=[],
-        license={
-            "identifier": "TEST-ONLY",
-            "reference": "https://example.invalid/license",
-            "commercial_use_approved": True,
-            "approved_by": "test",
-            "approved_at": datetime.now(UTC),
-        },
-        provenance={"source": "test", "review_notes": "test fixture"},
     )
 
 
