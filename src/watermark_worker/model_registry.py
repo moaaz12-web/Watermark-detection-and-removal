@@ -4,18 +4,19 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import BinaryIO, Literal, Protocol
 
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from watermark_worker.config import PipelineConfig
 from watermark_worker.contracts import ContractModel, Generation, Sha256
 from watermark_worker.errors import ModelValidationError
-from watermark_worker.storage import StoredObject, sha256_bytes
+from watermark_worker.storage import StreamedObject
 
 
 class ModelArtifact(ContractModel):
@@ -105,7 +106,9 @@ class CachedModelArtifact:
 
 
 class ModelArtifactReader(Protocol):
-    def read_bytes(self, uri: str, *, generation: str | None = None) -> StoredObject: ...
+    def download_to_file(
+        self, uri: str, destination: BinaryIO, *, generation: str | None = None
+    ) -> StreamedObject: ...
 
 
 class ModelArtifactCache:
@@ -119,6 +122,18 @@ class ModelArtifactCache:
     def materialize_all(self, artifacts: list[ModelArtifact]) -> dict[str, CachedModelArtifact]:
         return {artifact.artifact_id: self.materialize(artifact) for artifact in artifacts}
 
+    def materialize_selected(
+        self, artifacts: list[ModelArtifact], artifact_ids: set[str]
+    ) -> dict[str, CachedModelArtifact]:
+        selected = [artifact for artifact in artifacts if artifact.artifact_id in artifact_ids]
+        found = {artifact.artifact_id for artifact in selected}
+        missing = sorted(artifact_ids - found)
+        if missing:
+            raise ModelValidationError(
+                "missing selected model artifact(s): " + ", ".join(missing)
+            )
+        return self.materialize_all(selected)
+
     def materialize(self, artifact: ModelArtifact) -> CachedModelArtifact:
         target = self._target_path(artifact)
         metadata_path = self._metadata_path(target)
@@ -126,11 +141,27 @@ class ModelArtifactCache:
             self._validate_cached(artifact, target, metadata_path)
             return CachedModelArtifact(artifact=artifact, path=target)
 
-        stored = self.storage.read_bytes(artifact.uri, generation=artifact.generation)
-        self._validate_download(artifact, stored)
         target.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=target.parent, prefix=f".{target.name}.", suffix=".partial"
+        )
+        temporary_path = Path(temporary_name)
         try:
-            self._exclusive_write(target, stored.data)
+            with os.fdopen(descriptor, "wb") as stream:
+                stored = self.storage.download_to_file(
+                    artifact.uri, stream, generation=artifact.generation
+                )
+                stream.flush()
+                os.fsync(stream.fileno())
+            actual_size = temporary_path.stat().st_size
+            actual_checksum = self._sha256_file(temporary_path)
+            self._validate_download(
+                artifact,
+                stored,
+                actual_size=actual_size,
+                actual_checksum=actual_checksum,
+            )
+            os.link(temporary_path, target)
             self._exclusive_write(metadata_path, self._metadata(artifact))
         except FileExistsError:
             self._validate_cached(artifact, target, metadata_path)
@@ -138,15 +169,28 @@ class ModelArtifactCache:
             raise ModelValidationError(
                 f"cannot cache model artifact {artifact.artifact_id}: {exc}"
             ) from exc
+        finally:
+            temporary_path.unlink(missing_ok=True)
         return CachedModelArtifact(artifact=artifact, path=target)
 
-    def _validate_download(self, artifact: ModelArtifact, stored: StoredObject) -> None:
-        if stored.ref.uri != artifact.uri or stored.ref.generation != artifact.generation:
+    def _validate_download(
+        self,
+        artifact: ModelArtifact,
+        stored: StreamedObject,
+        *,
+        actual_size: int,
+        actual_checksum: str,
+    ) -> None:
+        if stored.uri != artifact.uri or stored.generation != artifact.generation:
             raise ModelValidationError(
                 f"model artifact {artifact.artifact_id} was not read at its pinned URI and "
                 "generation"
             )
-        if sha256_bytes(stored.data) != artifact.checksum_sha256:
+        if stored.size_bytes != actual_size:
+            raise ModelValidationError(
+                f"model artifact {artifact.artifact_id} download size does not match its object"
+            )
+        if actual_checksum != artifact.checksum_sha256:
             raise ModelValidationError(
                 f"model artifact {artifact.artifact_id} checksum does not match its manifest"
             )
@@ -168,12 +212,12 @@ class ModelArtifactCache:
                 f"model cache metadata is incompatible for artifact {artifact.artifact_id}"
             )
         try:
-            data = target.read_bytes()
+            checksum = self._sha256_file(target)
         except OSError as exc:
             raise ModelValidationError(
                 f"cannot read cached model artifact {artifact.artifact_id}: {exc}"
             ) from exc
-        if sha256_bytes(data) != artifact.checksum_sha256:
+        if checksum != artifact.checksum_sha256:
             raise ModelValidationError(
                 f"cached model artifact {artifact.artifact_id} checksum does not match its manifest"
             )
@@ -212,6 +256,14 @@ class ModelArtifactCache:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        return digest.hexdigest()
 
 
 @dataclass(frozen=True)

@@ -157,7 +157,7 @@ def run(
 ) -> int:
     if not arguments.validate_only and executor is None:
         raise InvalidCliError(
-            "real GPU inference is unavailable until W1 model artifacts are approved"
+            "production inference is unavailable until the W3 GPU runtime provider is packaged"
         )
     loaded_config = load_pipeline_config(arguments.config_path)
     loaded_models = load_model_manifest(arguments.model_manifest_path)

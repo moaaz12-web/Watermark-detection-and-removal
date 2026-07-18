@@ -674,6 +674,29 @@ Verify:
 
 - GPU smoke test proves sequential model lifecycle, reports device metadata, and records peak resource use.
 
+Local implementation checkpoint (2026-07-18):
+
+- The artifact cache streams only the enabled, generation-pinned GCS objects to local temporary
+  files. It validates each completed file against the manifest SHA-256 before publishing it into
+  the cache; model files are not accumulated in process memory.
+- Verified `.tar` and `.zip` bundles are expanded once into an identity-pinned local cache. Archive
+  path traversal, links, special files, excessive member counts, and excessive expanded size fail
+  closed. Raw checkpoint files such as `.pt` are passed through without extraction.
+- `build_production_executor` is the typed assembly boundary between verified artifacts and model
+  runtimes. It excludes disabled artifacts (OWLv2 is currently disabled), passes both enabled
+  detectors plus SAM 2 to the combined detection stage, and defers every heavyweight runtime load
+  until execution reaches that stage.
+- The executor initializes and releases stages sequentially: RMBG, combined
+  GroundingDINO/YOLO/SAM 2, then LaMa. LaMa is never initialized when no item passes the safety
+  gate. No model download, repository clone, or package installation occurs in per-item processing.
+- Dependency-light production stage adapters and their artifact outputs are locally tested with
+  in-memory runtime fakes. They preserve the original source as the sole LaMa image input and apply
+  the notebook's threshold `127` and two-pixel mask dilation.
+- The actual PyTorch/Transformers/Ultralytics/SAM 2/LaMa runtime-provider implementations and their
+  reviewed source packaging are deliberately not claimed complete. Per operator direction, this
+  checkpoint did not install those dependencies, download models, start or rent a GPU, submit a
+  Batch job, or run the GPU smoke test.
+
 ### Current status (W1-W7)
 
 - W1 is complete. The selected notebook and combined GroundingDINO/YOLO detector path are recorded,
@@ -687,11 +710,12 @@ Verify:
   `finalUri`; it intentionally does not load models or run inference. Unit and integration tests
   cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched
   manifest execution.
-- W3 has a tested foundation but remains open. The model-artifact cache reads every configured
-  artifact only at its pinned GCS generation, verifies SHA-256 before caching it, and records
-  immutable cache metadata. The stage lifecycle permits each stage to initialize once
-  before release. The artifact locations are now available in `model-manifest.json`, but no
-  production loader factory, model object, GPU smoke test, or Batch run exists yet.
+- W3 has a tested, dependency-light implementation foundation but remains open. Enabled artifacts
+  stream from pinned GCS generations into a checksum-validated cache; safe bundle preparation,
+  typed runtime-provider assembly, lazy production stage adapters, sequential release, and the
+  no-LaMa-on-blocked path are covered by local tests. The concrete heavyweight runtime provider,
+  reviewed RMBG/LaMa source packaging, CUDA container verification, resource measurements, and GPU
+  smoke test remain outstanding. No GPU or Batch operation was performed for this checkpoint.
 - W4's local orchestration implementation is complete against a deterministic, test-only reference
   executor. It exercises decoded input through safety-gated inpainting, writes the documented
   artifacts and structured results, and keeps the production CLI fail-closed when no real executor

@@ -115,6 +115,7 @@ class PipelineExecutor:
 
         background_outputs: dict[int, BackgroundRemovalOutput] = {}
         try:
+            _initialize_if_supported(self.background_removal)
             for index, item in enumerate(items):
                 try:
                     background_outputs[index] = self.background_removal.run(item.source_image)
@@ -130,6 +131,7 @@ class PipelineExecutor:
 
         detection_outputs: dict[int, DetectionOutput] = {}
         try:
+            _initialize_if_supported(self.detection)
             for index, background in background_outputs.items():
                 try:
                     detection_outputs[index] = self.detection.run(background.detector_image)
@@ -177,6 +179,8 @@ class PipelineExecutor:
                 record(index, outcome)
 
         try:
+            if allowed_masks:
+                _initialize_if_supported(self.inpainting)
             for index, approved_mask in allowed_masks.items():
                 try:
                     # The original source is intentionally the only inpainting input.
@@ -212,6 +216,12 @@ class PipelineExecutor:
                 record(index, current)
             terminal.append(current)
         return terminal
+
+
+def _initialize_if_supported(stage: object) -> None:
+    initialize = getattr(stage, "initialize", None)
+    if initialize is not None:
+        initialize()
 
 
 def _outcome_for_gate(

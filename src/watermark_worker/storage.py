@@ -7,7 +7,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any, BinaryIO, Protocol
 from urllib.parse import unquote, urlparse
 
 from google.api_core import exceptions as google_exceptions
@@ -31,10 +31,23 @@ class StoredObject:
     metadata: Mapping[str, str]
 
 
+@dataclass(frozen=True)
+class StreamedObject:
+    uri: str
+    generation: str
+    size_bytes: int
+    content_type: str
+    metadata: Mapping[str, str]
+
+
 class StorageAdapter(Protocol):
     def join_uri(self, prefix: str, relative_name: str) -> str: ...
 
     def read_bytes(self, uri: str, *, generation: str | None = None) -> StoredObject: ...
+
+    def download_to_file(
+        self, uri: str, destination: BinaryIO, *, generation: str | None = None
+    ) -> StreamedObject: ...
 
     def create_bytes(
         self,
@@ -131,6 +144,38 @@ class LocalStorageAdapter:
             ),
             data=data,
             metadata=metadata,
+        )
+
+    def download_to_file(
+        self, uri: str, destination: BinaryIO, *, generation: str | None = None
+    ) -> StreamedObject:
+        path = self._path_from_uri(uri)
+        digest = hashlib.sha256()
+        size_bytes = 0
+        try:
+            with path.open("rb") as source:
+                while chunk := source.read(1024 * 1024):
+                    destination.write(chunk)
+                    digest.update(chunk)
+                    size_bytes += len(chunk)
+        except FileNotFoundError as exc:
+            raise StorageNotFoundError(f"local object not found: {uri}") from exc
+        except PermissionError as exc:
+            raise PermanentStorageError(f"permission denied reading local object: {uri}") from exc
+        except OSError as exc:
+            raise PermanentStorageError(f"cannot read local object {uri}: {exc}") from exc
+
+        checksum = digest.hexdigest()
+        if generation is not None and generation != checksum:
+            raise StorageNotFoundError(
+                f"local object generation mismatch for {uri}: expected {generation}, got {checksum}"
+            )
+        return StreamedObject(
+            uri=uri,
+            generation=checksum,
+            size_bytes=size_bytes,
+            content_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+            metadata={},
         )
 
     def create_bytes(
@@ -264,6 +309,51 @@ class GcsStorageAdapter:
             raise
         except Exception as exc:
             raise _translate_gcs_error(exc, operation=f"read {uri}") from exc
+
+    def download_to_file(
+        self, uri: str, destination: BinaryIO, *, generation: str | None = None
+    ) -> StreamedObject:
+        location = parse_gcs_uri(uri)
+        try:
+            bucket = self.client.bucket(location.bucket)
+            requested_generation = int(generation) if generation is not None else None
+            blob = bucket.blob(location.object_name, generation=requested_generation)
+            reload_options: dict[str, Any] = {"timeout": self.timeout_seconds}
+            if requested_generation is not None:
+                reload_options["if_generation_match"] = requested_generation
+            blob.reload(**reload_options)
+            if blob.generation is None:
+                raise StorageNotFoundError(f"GCS object has no generation: {uri}")
+            loaded_generation = int(blob.generation)
+            if requested_generation is None:
+                requested_generation = loaded_generation
+            elif loaded_generation != requested_generation:
+                raise PermanentStorageError(
+                    f"GCS generation mismatch for {uri}: requested {requested_generation}, "
+                    f"loaded {loaded_generation}"
+                )
+            blob.download_to_file(
+                destination,
+                if_generation_match=requested_generation,
+                timeout=self.timeout_seconds,
+                checksum="auto",
+                single_shot_download=False,
+            )
+            remote_size = getattr(blob, "size", None)
+            size_bytes = int(remote_size) if remote_size is not None else destination.tell()
+            return StreamedObject(
+                uri=uri,
+                generation=str(requested_generation),
+                size_bytes=size_bytes,
+                content_type=(
+                    getattr(blob, "content_type", None) or "application/octet-stream"
+                ),
+                metadata=dict(getattr(blob, "metadata", None) or {}),
+            )
+        except (PermanentStorageError, RetryableStorageError):
+            raise
+        except Exception as exc:
+            raise _translate_gcs_error(exc, operation=f"download {uri}") from exc
 
     def create_bytes(
         self,

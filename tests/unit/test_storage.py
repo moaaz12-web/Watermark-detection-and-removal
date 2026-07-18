@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -73,10 +74,16 @@ class FakeBlob:
         self.upload_calls: list[dict[str, Any]] = []
         self.reload_calls: list[dict[str, Any]] = []
         self.data = b"source"
+        self.size = len(self.data)
+        self.content_type: str | None = "application/octet-stream"
 
     def download_as_bytes(self, **kwargs: Any) -> bytes:
         self.download_calls.append(kwargs)
         return self.data
+
+    def download_to_file(self, file_obj: Any, **kwargs: Any) -> None:
+        self.download_calls.append(kwargs)
+        file_obj.write(self.data)
 
     def upload_from_string(self, data: bytes, **kwargs: Any) -> None:
         self.upload_calls.append({"data": data, **kwargs})
@@ -117,6 +124,29 @@ def test_gcs_read_is_pinned_to_requested_generation() -> None:
     assert blob.generation == 123
     assert blob.download_calls == [{"if_generation_match": 123, "timeout": 60.0}]
     assert stored.ref.generation == "123"
+
+
+def test_gcs_stream_download_is_pinned_and_hashes_while_writing() -> None:
+    client = FakeClient()
+    storage = GcsStorageAdapter(client=client)
+    destination = BytesIO()
+
+    downloaded = storage.download_to_file(
+        "gs://input-bucket/path/model.bin", destination, generation="123"
+    )
+
+    blob = client.buckets["input-bucket"].blobs[0]
+    assert destination.getvalue() == b"source"
+    assert blob.download_calls == [
+        {
+            "if_generation_match": 123,
+            "timeout": 60.0,
+            "checksum": "auto",
+            "single_shot_download": False,
+        }
+    ]
+    assert downloaded.generation == "123"
+    assert downloaded.size_bytes == len(b"source")
 
 
 def test_gcs_read_loads_authoritative_object_metadata() -> None:

@@ -80,6 +80,20 @@ class InpaintingStage:
         self.closed += 1
 
 
+class InitializableInpaintingStage(InpaintingStage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.initialized = 0
+
+    def initialize(self) -> None:
+        self.initialized += 1
+
+
+class FailingBackgroundStage(BackgroundStage):
+    def initialize(self) -> None:
+        raise RuntimeError("model initialization failed")
+
+
 def test_executor_uses_original_source_for_inpainting_and_releases_stages() -> None:
     source = source_image()
     background = BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1)))
@@ -120,7 +134,7 @@ def test_unverified_gate_blocks_without_calling_inpainting() -> None:
 
 
 def test_no_watermark_skips_without_calling_inpainting() -> None:
-    inpainting = InpaintingStage()
+    inpainting = InitializableInpaintingStage()
     executor = PipelineExecutor(
         background_removal=BackgroundStage(mask((0, 0), (0, 1), (1, 0))),
         detection=DetectorStage(()),
@@ -134,6 +148,23 @@ def test_no_watermark_skips_without_calling_inpainting() -> None:
     assert outcome.decision is Decision.NO_WATERMARK
     assert outcome.final_image is None
     assert inpainting.calls == []
+    assert inpainting.initialized == 0
+
+
+def test_stage_initialization_failure_is_fatal_and_releases_the_stage() -> None:
+    background = FailingBackgroundStage(mask((0, 0), (0, 1), (1, 0)))
+    executor = PipelineExecutor(
+        background_removal=background,
+        detection=DetectorStage(()),
+        inpainting=InpaintingStage(),
+        safety_gate=gate_config(),
+    )
+
+    with pytest.raises(RuntimeError, match="model initialization failed"):
+        executor.process([PipelineItem(item_id="asset_123", source_image=source_image())])
+
+    assert background.calls == []
+    assert background.closed == 1
 
 
 def test_executor_emits_each_terminal_outcome_once() -> None:
