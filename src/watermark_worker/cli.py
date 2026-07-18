@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 import warnings
 from dataclasses import dataclass
@@ -39,6 +40,7 @@ from watermark_worker.model_registry import load_model_manifest, validate_model_
 from watermark_worker.pipeline import PipelineExecutor, PipelineItem, PipelineOutcome
 from watermark_worker.progress import emit_event
 from watermark_worker.result_writer import ArtifactPayload, ResultWriter, RunIdentity
+from watermark_worker.runtime_assembly import build_default_production_executor
 from watermark_worker.storage import (
     GcsStorageAdapter,
     LocalStorageAdapter,
@@ -155,10 +157,6 @@ def run(
     executor: PipelineExecutor | None = None,
     storage: StorageAdapter | None = None,
 ) -> int:
-    if not arguments.validate_only and executor is None:
-        raise InvalidCliError(
-            "production inference is unavailable until the W3 GPU runtime provider is packaged"
-        )
     loaded_config = load_pipeline_config(arguments.config_path)
     loaded_models = load_model_manifest(arguments.model_manifest_path)
     validate_model_bindings(loaded_config.config, loaded_models.manifest)
@@ -264,7 +262,6 @@ def run(
                 reused=written.reused,
             )
     else:
-        assert executor is not None
         prepared: dict[str, PreparedInferenceItem] = {}
         pending: list[PipelineItem] = []
         for item in manifest.items:
@@ -361,7 +358,13 @@ def run(
 
         try:
             if pending:
-                executor.process(pending, on_terminal=checkpoint)
+                active_executor = executor or build_default_production_executor(
+                    config=loaded_config.config,
+                    manifest=loaded_models.manifest,
+                    storage=storage,
+                    work_root=_model_work_root(),
+                )
+                active_executor.process(pending, on_terminal=checkpoint)
         finally:
             for context in prepared.values():
                 context.image.close()
@@ -401,6 +404,14 @@ def run(
         reused=job.reused,
     )
     return 0
+
+
+def _model_work_root() -> Path:
+    configured = os.environ.get("WM_MODEL_WORK_ROOT")
+    if configured:
+        return Path(configured).resolve()
+    temporary_root = Path(os.environ.get("TMPDIR", "/tmp/watermark-worker")).resolve()
+    return temporary_root / "models"
 
 
 def _load_manifest(

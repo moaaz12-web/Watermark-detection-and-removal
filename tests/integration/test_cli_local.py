@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 from tests.support.reference_pipeline import reference_executor
+from watermark_worker import cli as cli_module
 from watermark_worker.cli import entrypoint
 from watermark_worker.errors import RetryableStorageError
 from watermark_worker.result_writer import ResultWriter
@@ -305,10 +306,25 @@ def test_local_reference_inference_writes_the_documented_artifact_contract(
     assert background.closed == detection.closed == inpainting.closed == 1
 
 
-def test_inference_fails_closed_without_an_injected_executor(tmp_path: Path) -> None:
+def test_inference_builds_the_default_executor_when_none_is_injected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_path, model_manifest_path = write_worker_material(tmp_path)
     manifest_path = write_local_manifest(tmp_path, item_count=1)
     output_root = tmp_path / "output"
+    executor, background, detection, inpainting = reference_executor(config_path)
+    assembly_calls: list[dict[str, object]] = []
+
+    def fake_build_default_executor(**kwargs: object):
+        assembly_calls.append(kwargs)
+        return executor
+
+    monkeypatch.setattr(
+        cli_module,
+        "build_default_production_executor",
+        fake_build_default_executor,
+        raising=False,
+    )
 
     exit_code = entrypoint(
         inference_arguments(
@@ -319,8 +335,10 @@ def test_inference_fails_closed_without_an_injected_executor(tmp_path: Path) -> 
         )
     )
 
-    assert exit_code == 2
-    assert not (output_root / "tenant_17/wm_batch/_COMPLETE.json").exists()
+    assert exit_code == 0
+    assert len(assembly_calls) == 1
+    assert background.calls == detection.calls == inpainting.calls == 1
+    assert (output_root / "tenant_17/wm_batch/_COMPLETE.json").exists()
 
 
 def test_unverified_reference_gate_does_not_write_a_final_artifact(tmp_path: Path) -> None:
@@ -458,13 +476,15 @@ def test_reference_batch_resumes_after_interruption_and_skips_completed_items(
         "total": 5,
     }
 
-    replay_executor, replay_background, replay_detection, replay_inpainting = (
-        reference_executor(config_path)
-    )
+    def reject_default_assembly(**kwargs: object) -> None:
+        raise AssertionError(f"completed replay attempted model assembly: {kwargs}")
 
-    assert entrypoint(arguments, executor=replay_executor) == 0
-    assert replay_background.calls == replay_detection.calls == replay_inpainting.calls == 0
-    assert replay_background.closed == replay_detection.closed == replay_inpainting.closed == 0
+    monkeypatch.setattr(
+        cli_module,
+        "build_default_production_executor",
+        reject_default_assembly,
+    )
+    assert entrypoint(arguments) == 0
 
 
 def test_cli_rejects_gcs_execution_without_pinned_manifest_generation(tmp_path: Path) -> None:

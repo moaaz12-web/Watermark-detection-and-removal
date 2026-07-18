@@ -30,10 +30,10 @@ revision = "2b90b9f5ceec907a1c18123530e92e794ad901a4"
 [sources.lama]
 url = "https://github.com/advimman/lama.git"
 revision = "786f5936b27fb3dacd2b1ad799e4de968ea697e7"
+packaging = "vendored under src/saicinpainting with the checkpoint compatibility patch"
 
-# The source identity available today is the checksum-pinned private RMBG bundle.
-# Its executable Python files must be extracted, reviewed, and packaged separately
-# before the production provider may load RMBG without trust_remote_code=True.
+# RMBG custom code is loaded only from this checksum-verified local bundle with
+# local_files_only=True under ADR-003; it is never fetched from Hugging Face at runtime.
 [sources.rmbg]
 url = "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/rmbg/edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6/rmbg-1.4.tar"
 revision = "edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6"

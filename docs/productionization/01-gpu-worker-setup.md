@@ -713,10 +713,19 @@ Local implementation checkpoint (2026-07-18):
   against the checksum-verified, generation-pinned local bundle. This preserves the notebook's
   custom-model loading behavior without permitting a runtime network fetch. A dependency-light
   test fixes both flags as part of the loader contract.
-- The LaMa adapter expects the commit-pinned `saicinpainting` package to already exist in the image;
-  the source has not yet been vendored and its required compatibility patch has not yet been
-  recorded and tested. For that reason, the production CLI remains fail-closed instead of
-  automatically constructing the provider.
+- LaMa's `saicinpainting` Python package is vendored from commit
+  `786f5936b27fb3dacd2b1ad799e4de968ea697e7` with its Apache-2.0 license and provenance. The
+  maintained checkpoint patch explicitly passes `weights_only=False` for the trusted,
+  checksum-verified checkpoint and falls back for older PyTorch call signatures. Tests preserve
+  the revision, license, wheel inclusion, and patch contract.
+- When inference is requested without an injected test executor, the CLI now assembles the
+  production executor from the generation-pinned model cache, safe bundle cache, and local GPU
+  provider. Assembly occurs only when at least one valid, incomplete item needs inference;
+  validation-only runs, corrupt-only batches, and completed replays do not import GPU dependencies
+  or materialize models. `WM_MODEL_WORK_ROOT` can override the model cache root; otherwise it uses
+  `$TMPDIR/models`.
+- Phase A code-level implementation is complete. The candidate GPU dependency set deliberately
+  remains outside the lightweight lock until Phase B resolves and tests it in the GPU image.
 - Per operator direction, this checkpoint did not install PyTorch, Transformers, Ultralytics,
   SAM 2, LaMa, or their transitive dependencies; download model files; connect to a GPU; start or
   rent a GPU; submit a Batch job; or run the GPU smoke test.
@@ -734,19 +743,20 @@ Local implementation checkpoint (2026-07-18):
   `finalUri`; it intentionally does not load models or run inference. Unit and integration tests
   cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched
   manifest execution.
-- W3 has a tested local implementation foundation but remains open. Enabled artifacts stream from
+- W3's Phase A code-level implementation is complete, but W3 remains open until its GPU acceptance
+  checks pass. Enabled artifacts stream from
   pinned GCS generations into a checksum-validated cache; safe bundle preparation, compact safety
   masks, CUDA preflight, typed local runtime-provider assembly, lazy production stage adapters,
   sequential release, and the no-LaMa-on-blocked path are covered by dependency-light tests. The
   RMBG source-vendoring requirement is intentionally deferred under ADR-003. The candidate GPU
-  dependency set still needs resolution and lock hashes; commit-pinned LaMa source and its patch
-  still need to be packaged; the production CLI still needs final provider assembly; and the
-  provider still needs container and real-GPU verification, resource measurements, and its
-  prohibited-for-now GPU smoke test. No GPU or Batch operation was performed for this checkpoint.
+  dependency set still needs Phase B resolution and lock hashes. The provider still needs GPU-image
+  dependency verification, resource measurements, and its prohibited-for-now GPU smoke test. No
+  GPU or Batch operation was performed for this checkpoint.
 - W4's local orchestration implementation is complete against a deterministic, test-only reference
   executor. It exercises decoded input through safety-gated inpainting, writes the documented
-  artifacts and structured results, and keeps the production CLI fail-closed when no real executor
-  is injected. Production model loading remains follow-up acceptance work under W3.
+  artifacts and structured results. The production CLI now assembles the real local provider when
+  no executor is injected, while tests replace only that assembly boundary. Production model
+  execution remains follow-up GPU acceptance work under W3.
 - W5's local batching and resumability implementation is complete. Integration tests cover a
   five-item batch, corrupt-item isolation, per-item checkpointing, interrupted execution, partial
   replay, and a subsequent replay with zero model-stage calls.
@@ -769,12 +779,12 @@ Implementation acceptance:
   executor.
 - [x] Artifacts match the documented local output contract.
 - [x] Per-item failures are structured.
-- [x] Reference stages are test-only; production execution remains fail-closed without an injected
-  executor.
+- [x] Reference stages are test-only; production execution assembles the verified model cache and
+  local GPU provider when an executor is not injected.
 
 Deferred production acceptance:
 
-- [ ] Replace the reference executor with approved production stage loaders after W3.
+- [x] Replace the default reference executor path with production stage loaders.
 - [ ] Run an operator-selected smoke manifest and inspect the produced artifacts and decisions.
 
 ### [x] W5. Add batch iteration and resumability
