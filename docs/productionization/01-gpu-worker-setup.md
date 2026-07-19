@@ -846,9 +846,11 @@ Task 1, read-only preflight, found:
   pipeline had already run successfully on a Colab T4.
 - T4 is exposed in `us-central1-a`, `us-central1-b`, `us-central1-c`, and `us-central1-f`. The
   bounded Batch contract uses `n1-standard-4` plus one `nvidia-tesla-t4` in `us-central1-c`.
-- The regional CPU quota is 32 with zero in use. The on-demand `NVIDIA_T4_GPUS` quota was observed
-  at `0` before the T4 request. This is a hard submission gate; no Batch GPU job may be submitted
-  until Google grants at least one on-demand T4 in `us-central1`.
+- The regional CPU quota is 32 with zero in use. On 2026-07-19 the existing T4 quota preference was
+  retried with the bounded one-task, zero-retry, 90-minute acceptance justification. Google
+  immediately retained `grantedValue: 0` for both `NVIDIA-T4-GPUS-per-project-region` in
+  `us-central1` and `GPUS-ALL-REGIONS-per-project`. These are hard submission gates; no Batch GPU
+  job may be submitted until both granted values are at least one.
 - Batch, Compute Engine, Cloud Logging, and Cloud Quotas APIs are enabled. The Google-managed Batch
   service identity has `roles/batch.serviceAgent`.
 - `default` and `infringement-vpc` exist. The latter has the private
@@ -912,10 +914,12 @@ five. It writes deterministic output prefixes and performs no GCS reads or write
 ### GPU acceptance Tasks 4-5 checkpoint (2026-07-19)
 
 Task 4's non-GPU setup is complete. `gpu-acceptance/batch-one-image.json` pins the latest digest,
-manifest generation, `n1-standard-4` with one `nvidia-tesla-t4`, `STANDARD`, `NO_RESERVATION`, `us-central1-c`, the dedicated
-service account, explicit default network/subnetwork, automatic driver installation, one task,
-zero retries, a 90-minute timeout, a 200 GB balanced boot disk, and Cloud Logging. Contract tests
-prevent those bounds from drifting. It has **not** been submitted because granted T4 quota is zero.
+manifest generation, `n1-standard-4` with one `nvidia-tesla-t4`, `STANDARD`, `NO_RESERVATION`,
+`us-central1-c`, the dedicated service account, explicit default network/subnetwork, automatic
+driver installation, one task, zero retries, a 90-minute timeout, a 200 GB balanced boot disk, and
+Cloud Logging. Contract tests
+prevent those bounds from drifting. It has **not** been submitted because both the regional T4 and
+project-wide total-GPU granted quotas are zero after the 2026-07-19 retry.
 
 Task 5's validation boundary is recorded in `gpu-acceptance/README.md`. It checks model/runtime
 loading, CUDA/T4 identity, stage lifecycle, detections, masks, annotations, results, completion

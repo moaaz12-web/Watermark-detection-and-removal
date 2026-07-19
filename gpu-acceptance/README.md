@@ -7,8 +7,10 @@ not an accuracy or product-quality evaluation.
 
 The acceptance target is one on-demand NVIDIA T4 attached to `n1-standard-4` in `us-central1-c`.
 The earlier L4/G2 target was dropped because the same pipeline already ran successfully on a T4 in
-Colab. The project currently reports a T4 quota limit of `0`; do not submit
-`batch-one-image.json` until Google grants at least one on-demand T4 in `us-central1`.
+Colab. On 2026-07-19 Google immediately denied the retried requests for both required limits:
+`NVIDIA-T4-GPUS-per-project-region` in `us-central1` and `GPUS-ALL-REGIONS-per-project` remain at
+`0`. No Batch GPU job has been submitted. Do not submit `batch-one-image.json` until both granted
+values are at least one.
 
 The corrected CPU build `ee4d4eca-3e2f-4def-9a36-6d65cf31b8e6` passed and published:
 
