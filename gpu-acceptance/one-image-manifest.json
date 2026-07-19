@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "jobId": "gpu_smoke_one_20260719t090500z",
+  "tenantId": "gpu_acceptance",
+  "pipelineVersion": "watermark-v1",
+  "createdAt": "2026-07-19T09:05:00Z",
+  "items": [
+    {
+      "itemId": "asset_1",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_one_20260719t090500z/asset_1.png",
+      "inputGeneration": "1784451877569374",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_one_20260719t090500z/asset_1/",
+      "sourceChecksumSha256": "ae91d7de2e5f0bb2bdb288b09e40e37c7cf1bae6f1d5f8e6a03e6c4f178f6739"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "jobId": "gpu_smoke_five_20260719t090500z",
+  "tenantId": "gpu_acceptance",
+  "pipelineVersion": "watermark-v1",
+  "createdAt": "2026-07-19T09:05:00Z",
+  "items": [
+    {
+      "itemId": "asset_1",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_1.png",
+      "inputGeneration": "1784451884304795",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_1/",
+      "sourceChecksumSha256": "ae91d7de2e5f0bb2bdb288b09e40e37c7cf1bae6f1d5f8e6a03e6c4f178f6739"
+    },
+    {
+      "itemId": "asset_2",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_2.png",
+      "inputGeneration": "1784451891923849",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_2/",
+      "sourceChecksumSha256": "ace84022294be4dc2d7ac8c821a753d2bbf290d0fd51e9fbfa909b4d8804984f"
+    },
+    {
+      "itemId": "asset_3",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_3.png",
+      "inputGeneration": "1784451899098841",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_3/",
+      "sourceChecksumSha256": "44acc4e948432ed6543d023aec18eb67aa34c3059162a25d99a0a60ae2586fd7"
+    },
+    {
+      "itemId": "asset_4",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_4.png",
+      "inputGeneration": "1784451907090443",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_4/",
+      "sourceChecksumSha256": "333eb841c383e9e9d29b3c325d14bb5404420585314214ea8434cfd9fe074b45"
+    },
+    {
+      "itemId": "asset_5",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_5.png",
+      "inputGeneration": "1784451915035155",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/asset_5/",
+      "sourceChecksumSha256": "512a7ee56b4e32548c4342721e244af16784a2e3c52f951f08358b713882ef5b"
+    }
+  ]
+}

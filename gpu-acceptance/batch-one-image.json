@@ -1,0 +1,76 @@
+{
+  "taskGroups": [
+    {
+      "taskSpec": {
+        "runnables": [
+          {
+            "container": {
+              "imageUri": "us-central1-docker.pkg.dev/project-5909a738-2fdc-451e-ad6/watermark-worker/watermark-worker@sha256:16da56ccf7095a84134e11899f44f5be5f71511d265de09975a8cca9edaa40a2",
+              "commands": [
+                "--manifest-uri",
+                "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_one_20260719t090500z/input-manifest.json",
+                "--manifest-generation",
+                "1784452037999378",
+                "--config",
+                "/app/configs/watermark-v1.yaml",
+                "--model-manifest",
+                "/app/model-manifest.json",
+                "--worker-image-digest",
+                "us-central1-docker.pkg.dev/project-5909a738-2fdc-451e-ad6/watermark-worker/watermark-worker@sha256:16da56ccf7095a84134e11899f44f5be5f71511d265de09975a8cca9edaa40a2"
+              ]
+            }
+          }
+        ],
+        "computeResource": {
+          "cpuMilli": 4000,
+          "memoryMib": 14336
+        },
+        "maxRetryCount": 0,
+        "maxRunDuration": "5400s"
+      },
+      "taskCount": 1,
+      "parallelism": 1
+    }
+  ],
+  "allocationPolicy": {
+    "instances": [
+      {
+        "installGpuDrivers": true,
+        "policy": {
+          "machineType": "g2-standard-4",
+          "provisioningModel": "STANDARD",
+          "reservation": "NO_RESERVATION",
+          "bootDisk": {
+            "type": "pd-balanced",
+            "sizeGb": 200
+          }
+        }
+      }
+    ],
+    "location": {
+      "allowedLocations": [
+        "zones/us-central1-c"
+      ]
+    },
+    "serviceAccount": {
+      "email": "watermark-gpu-worker@project-5909a738-2fdc-451e-ad6.iam.gserviceaccount.com"
+    },
+    "network": {
+      "networkInterfaces": [
+        {
+          "network": "projects/project-5909a738-2fdc-451e-ad6/global/networks/default",
+          "subnetwork": "projects/project-5909a738-2fdc-451e-ad6/regions/us-central1/subnetworks/default",
+          "noExternalIpAddress": false
+        }
+      ]
+    }
+  },
+  "logsPolicy": {
+    "destination": "CLOUD_LOGGING"
+  },
+  "labels": {
+    "component": "watermark-worker",
+    "environment": "gpu-acceptance",
+    "pipeline": "watermark-v1"
+  }
+}
