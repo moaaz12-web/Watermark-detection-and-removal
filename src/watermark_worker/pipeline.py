@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 from PIL import Image
 
@@ -20,6 +21,13 @@ class StageArtifact:
     relative_name: str
     data: bytes
     content_type: str
+
+
+@dataclass(frozen=True)
+class StageLifecycleEvent:
+    stage: str
+    phase: Literal["initialized", "released"]
+    duration_seconds: float
 
 
 @dataclass(frozen=True)
@@ -59,6 +67,9 @@ class InpaintingStage(Protocol):
     def close(self) -> None: ...
 
 
+PipelineStage = BackgroundRemovalStage | DetectionStage | InpaintingStage
+
+
 @dataclass(frozen=True)
 class PipelineItem:
     item_id: str
@@ -90,11 +101,13 @@ class PipelineExecutor:
         detection: DetectionStage,
         inpainting: InpaintingStage,
         safety_gate: SafetyGateConfig,
+        on_stage_lifecycle: Callable[[StageLifecycleEvent], None] | None = None,
     ) -> None:
         self.background_removal = background_removal
         self.detection = detection
         self.inpainting = inpainting
         self.safety_gate = safety_gate
+        self.on_stage_lifecycle = on_stage_lifecycle
 
     def process(
         self,
@@ -115,7 +128,7 @@ class PipelineExecutor:
 
         background_outputs: dict[int, BackgroundRemovalOutput] = {}
         try:
-            _initialize_if_supported(self.background_removal)
+            self._initialize_stage("background_removal", self.background_removal)
             for index, item in enumerate(items):
                 try:
                     background_outputs[index] = self.background_removal.run(item.source_image)
@@ -127,11 +140,11 @@ class PipelineExecutor:
                         ),
                     )
         finally:
-            self.background_removal.close()
+            self._close_stage("background_removal", self.background_removal)
 
         detection_outputs: dict[int, DetectionOutput] = {}
         try:
-            _initialize_if_supported(self.detection)
+            self._initialize_stage("detection", self.detection)
             for index, background in background_outputs.items():
                 try:
                     detection_outputs[index] = self.detection.run(background.detector_image)
@@ -143,7 +156,7 @@ class PipelineExecutor:
                         ),
                     )
         finally:
-            self.detection.close()
+            self._close_stage("detection", self.detection)
 
         allowed_masks: dict[int, BinaryMask] = {}
         allowed_outcomes: dict[int, PipelineOutcome] = {}
@@ -180,7 +193,7 @@ class PipelineExecutor:
 
         try:
             if allowed_masks:
-                _initialize_if_supported(self.inpainting)
+                self._initialize_stage("inpainting", self.inpainting)
             for index, approved_mask in allowed_masks.items():
                 try:
                     # The original source is intentionally the only inpainting input.
@@ -203,7 +216,7 @@ class PipelineExecutor:
                     )
                 record(index, outcome)
         finally:
-            self.inpainting.close()
+            self._close_stage("inpainting", self.inpainting)
 
         terminal: list[PipelineOutcome] = []
         for index, (item, current) in enumerate(zip(items, outcomes, strict=True)):
@@ -216,6 +229,31 @@ class PipelineExecutor:
                 record(index, current)
             terminal.append(current)
         return terminal
+
+    def _initialize_stage(self, name: str, stage: PipelineStage) -> None:
+        started = time.monotonic()
+        _initialize_if_supported(stage)
+        self._record_stage_event(name, "initialized", time.monotonic() - started)
+
+    def _close_stage(self, name: str, stage: PipelineStage) -> None:
+        started = time.monotonic()
+        stage.close()
+        self._record_stage_event(name, "released", time.monotonic() - started)
+
+    def _record_stage_event(
+        self,
+        stage: str,
+        phase: Literal["initialized", "released"],
+        duration_seconds: float,
+    ) -> None:
+        if self.on_stage_lifecycle is not None:
+            self.on_stage_lifecycle(
+                StageLifecycleEvent(
+                    stage=stage,
+                    phase=phase,
+                    duration_seconds=duration_seconds,
+                )
+            )
 
 
 def _initialize_if_supported(stage: object) -> None:

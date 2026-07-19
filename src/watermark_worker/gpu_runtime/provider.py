@@ -38,6 +38,10 @@ class LocalGpuRuntimeProvider:
     def cuda_device(self) -> CudaDevice:
         return self._device
 
+    @property
+    def torch_module(self) -> Any:
+        return self._torch
+
     def load_background_removal(
         self,
         artifact: PreparedModelArtifact,

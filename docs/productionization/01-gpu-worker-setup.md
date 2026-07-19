@@ -677,7 +677,8 @@ Acceptance:
 
 Verify:
 
-- GPU smoke test proves sequential model lifecycle, reports device metadata, and records peak resource use.
+- [x] Dependency-light tests prove sequential model lifecycle and acceptance-metric emission.
+- [ ] GPU smoke test proves the same lifecycle on L4 hardware and records real peak resource use.
 
 Local implementation checkpoint (2026-07-18):
 
@@ -769,9 +770,10 @@ Local implementation checkpoint (2026-07-18):
   sequential release, and the no-LaMa-on-blocked path are covered by dependency-light tests. The
   RMBG source-vendoring requirement is intentionally deferred under ADR-003. The dependency lock,
   reviewed base-image digest, private remote image build, CPU-only import verification, replay
-  checks, and immutable image digest are recorded. The provider still needs resource measurements
-  and its prohibited-for-now GPU smoke test. No GPU or Batch operation was performed for this
-  checkpoint.
+  checks, and immutable image digest are recorded. GPU acceptance instrumentation now emits device
+  metadata, stage initialization/release timing, current and peak CUDA allocation, peak process
+  RAM, and local-disk use. Actual measurements and the GPU smoke test remain deferred. No GPU or
+  Batch operation was performed for this checkpoint.
 - W4's local orchestration implementation is complete against a deterministic, test-only reference
   executor. It exercises decoded input through safety-gated inpainting, writes the documented
   artifacts and structured results. The production CLI now assembles the real local provider when
@@ -801,7 +803,7 @@ changes and review the complete diff before committing.
 | Workstream | Code/build status | Still deferred or required |
 | --- | --- | --- |
 | W3 Phase A | Complete. Production provider, generation/checksum-verified model cache, safe bundle preparation, compact masks, lazy model adapters, safety-gated LaMa, and sequential stage release are implemented and dependency-light tested. | Actual selected-model execution has not run on CUDA hardware. |
-| W3 Phase B | Complete at the CPU-image-verification level. The dependency lock, digest-pinned CUDA/PyTorch base, private image, runtime import/CUDA ABI gate, and read-only validation/replay checks passed. Security scanning is not part of W3. | CUDA/L4 smoke, one- and five-image model runs, stage-lifecycle observation, and peak VRAM/RAM/disk/init-time measurements. |
+| W3 Phase B | Complete at the CPU-image-verification level. The dependency lock, digest-pinned CUDA/PyTorch base, private image, runtime import/CUDA ABI gate, read-only validation/replay checks, and dependency-light GPU acceptance instrumentation are implemented. Security scanning is not part of W3. | Rebuild the immutable image with the acceptance instrumentation, then run CUDA/L4 one- and five-image smoke tests and collect the emitted measurements. |
 | W4 | Code implementation complete. The full local pipeline path and production assembly boundary are tested. | Run an operator-selected smoke manifest and inspect real model decisions/artifacts after W3 GPU authorization. |
 | W5 | Code implementation complete. Five-item batching, interruption, resumability, corrupt-item isolation, and zero-stage replay are tested with reference stages. | Repeat five-item/interruption acceptance with approved production stages on the target GPU. |
 | W6 | Code implementation complete. Generation-pinned GCS reads, conditional writes, markers, collision handling, and stale-marker rejection are tested hermetically. | Opt-in live-GCS acceptance against isolated prefixes; this does not require a GPU but must use approved test paths. |
@@ -830,6 +832,65 @@ Operator constraints at this checkpoint:
   block GPU acceptance on it, or describe the image as scanned.
 - OWLv2 remains disabled. GroundingDINO and YOLO remain enabled together, followed by SAM 2 and
   LaMa, as frozen in `configs/watermark-v1.yaml`.
+
+### GPU acceptance preparation: Tasks 1-3 (2026-07-19)
+
+These tasks prepare acceptance without provisioning hardware. They performed no resource creation,
+Batch submission, GPU connection, model download, or local heavyweight dependency installation.
+
+Task 1, read-only preflight, found:
+
+- Project `project-5909a738-2fdc-451e-ad6` exposes `g2-standard-4` in `us-central1-c` with four
+  vCPUs, 16,384 MiB RAM, and one NVIDIA L4.
+- The regional CPU quota is 32 with zero in use. The regional quota response does not contain an
+  `NVIDIA_L4_GPUS` allocation, so L4 quota is **not confirmed** and must be granted or explicitly
+  verified before any Batch submission. Do not discover this by launching a job.
+- Batch and Compute Engine APIs are enabled. `logging.googleapis.com` was not present in the enabled
+  service list and should be enabled before the acceptance job so its structured evidence reaches
+  Cloud Logging.
+- `default` and `infringement-vpc` exist. The latter has the private
+  `cloud-run-private-subnet` (`10.10.0.0/26`) with Private Google Access enabled; the final Batch
+  template must select its network/subnetwork explicitly and still provide the egress needed by
+  automatic GPU-driver installation.
+- No dedicated GPU worker service account exists. The only user-managed candidates are the default
+  Compute service account and `infringement@...`; neither should be silently reused. Create a
+  least-privilege GPU worker service account before Task 4.
+
+Task 2 is implemented in code. `PipelineExecutor` reports each production stage's initialization
+and release duration. `GpuAcceptanceRecorder`, attached only when the default GPU runtime is
+assembled, emits `gpu_acceptance_started` and `gpu_stage_lifecycle` structured records containing
+the CUDA device/version, current and peak CUDA allocator bytes, peak process RAM, and work-disk
+used/free bytes. Dependency-light fakes test this path; PyTorch and Transformers were not installed
+locally. The published digest above predates this instrumentation, so a new CPU-built immutable
+image digest is required before Task 4.
+
+Task 3's manifest tooling is implemented, but actual manifests cannot be created yet because the
+private data bucket currently contains build evidence only and no operator-approved smoke images.
+After uploading exactly five approved images, create a local inventory containing their pinned GCS
+metadata (do not download them merely to generate the manifests):
+
+```json
+[
+  {
+    "itemId": "asset_1",
+    "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu-acceptance/inputs/asset_1.png",
+    "inputGeneration": "GCS_GENERATION",
+    "sourceChecksumSha256": "LOWERCASE_SHA256_FROM_THE_UPLOAD"
+  }
+]
+```
+
+The real inventory must contain exactly five entries. Generate both validated manifests with:
+
+```bash
+python -m watermark_worker.smoke_manifests \
+  --inventory gpu-smoke-inputs.json \
+  --destination gpu-smoke-manifests \
+  --output-bucket project-5909a738-2fdc-451e-ad6-watermark-data
+```
+
+This creates `one-image-manifest.json` from the first entry and `five-image-manifest.json` from all
+five. It writes deterministic output prefixes and performs no GCS reads or writes.
 
 ### Google Cloud resource and cost checkpoint (2026-07-19)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -18,7 +19,7 @@ from watermark_worker.model_registry import (
     ModelManifest,
     validate_model_bindings,
 )
-from watermark_worker.pipeline import PipelineExecutor
+from watermark_worker.pipeline import PipelineExecutor, StageLifecycleEvent
 from watermark_worker.production_stages import (
     DetectionRuntime,
     LamaRuntime,
@@ -76,6 +77,7 @@ def build_production_executor(
     materializer: ModelArtifactMaterializer,
     preparer: ModelArtifactPreparer,
     runtime_provider: ProductionRuntimeProvider,
+    on_stage_lifecycle: Callable[[StageLifecycleEvent], None] | None = None,
 ) -> PipelineExecutor:
     """Prepare immutable artifacts now and load each GPU stage only when execution reaches it."""
 
@@ -128,6 +130,7 @@ def build_production_executor(
             config.inpainting,
         ),
         safety_gate=config.safety_gate,
+        on_stage_lifecycle=on_stage_lifecycle,
     )
 
 

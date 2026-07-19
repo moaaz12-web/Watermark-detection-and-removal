@@ -12,6 +12,7 @@ from watermark_worker.pipeline import (
     PipelineExecutor,
     PipelineItem,
     PipelineOutcome,
+    StageLifecycleEvent,
 )
 from watermark_worker.stages.safety_gate import BinaryMask
 
@@ -114,6 +115,29 @@ def test_executor_uses_original_source_for_inpainting_and_releases_stages() -> N
     assert inpainting.calls[0][0] is source
     assert detector.calls[0] is not source
     assert background.closed == detector.closed == inpainting.closed == 1
+
+
+def test_executor_reports_stage_initialization_and_release() -> None:
+    events: list[StageLifecycleEvent] = []
+    executor = PipelineExecutor(
+        background_removal=BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1))),
+        detection=DetectorStage((mask((3, 3)),)),
+        inpainting=InpaintingStage(),
+        safety_gate=gate_config(),
+        on_stage_lifecycle=events.append,
+    )
+
+    executor.process([PipelineItem(item_id="asset_123", source_image=source_image())])
+
+    assert [(event.stage, event.phase) for event in events] == [
+        ("background_removal", "initialized"),
+        ("background_removal", "released"),
+        ("detection", "initialized"),
+        ("detection", "released"),
+        ("inpainting", "initialized"),
+        ("inpainting", "released"),
+    ]
+    assert all(event.duration_seconds >= 0 for event in events)
 
 
 def test_unverified_gate_blocks_without_calling_inpainting() -> None:

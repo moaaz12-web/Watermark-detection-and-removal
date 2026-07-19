@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from watermark_worker.config import PipelineConfig
+from watermark_worker.gpu_runtime.acceptance import GpuAcceptanceRecorder
 from watermark_worker.gpu_runtime.provider import LocalGpuRuntimeProvider
 from watermark_worker.model_bundles import ModelBundleCache
 from watermark_worker.model_registry import ModelArtifactCache, ModelManifest
@@ -21,6 +22,12 @@ def build_default_production_executor(
     """Assemble the production GPU path without runtime installs or public downloads."""
     model_storage = storage if isinstance(storage, GcsStorageAdapter) else GcsStorageAdapter()
     runtime_provider = LocalGpuRuntimeProvider()
+    acceptance = GpuAcceptanceRecorder(
+        torch_module=runtime_provider.torch_module,
+        device=runtime_provider.cuda_device,
+        work_root=work_root,
+    )
+    acceptance.start()
     return build_production_executor(
         config=config,
         manifest=manifest,
@@ -30,4 +37,5 @@ def build_default_production_executor(
         ),
         preparer=ModelBundleCache(work_root / "bundles"),
         runtime_provider=runtime_provider,
+        on_stage_lifecycle=acceptance.record,
     )
