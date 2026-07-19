@@ -809,15 +809,16 @@ changes and review the complete diff before committing.
 | W6 | Code implementation complete. Generation-pinned GCS reads, conditional writes, markers, collision handling, and stale-marker rejection are tested hermetically. | Opt-in live-GCS acceptance against isolated prefixes; this does not require a GPU but must use approved test paths. |
 | W7 | Reference-container implementation complete and its historical reference-image security gate passed. The GPU image also passed non-root, read-only, network-disabled CPU validation/replay. | Repeat smoke, SIGTERM checkpoint, and CUDA/L4 checks on the target GPU. No GPU-image scan is required by W3. |
 
-The immutable CPU-verified image is:
+The latest immutable CPU-verified image, including acceptance instrumentation and packaged runtime
+configuration/model manifest, is:
 
 ```text
-us-central1-docker.pkg.dev/project-5909a738-2fdc-451e-ad6/watermark-worker/watermark-worker@sha256:a5064be9496c40d7a39a873ee946fb234b7709b2608faa5d309c8bdd13a9e8b1
+us-central1-docker.pkg.dev/project-5909a738-2fdc-451e-ad6/watermark-worker/watermark-worker@sha256:16da56ccf7095a84134e11899f44f5be5f71511d265de09975a8cca9edaa40a2
 ```
 
-Cloud Build `3be291ae-be70-4d8b-9e97-5a93e0979cb7` is the successful publication build. Its evidence
-is under
-`gs://project-5909a738-2fdc-451e-ad6-watermark-data/cloud-build/gpu-images/3be291ae-be70-4d8b-9e97-5a93e0979cb7/`.
+Cloud Build `ee4d4eca-3e2f-4def-9a36-6d65cf31b8e6` is the latest successful publication build. Its
+evidence is under
+`gs://project-5909a738-2fdc-451e-ad6-watermark-data/cloud-build/gpu-images/ee4d4eca-3e2f-4def-9a36-6d65cf31b8e6/`.
 The runtime evidence records PyTorch `2.5.1+cu121`, torchvision `0.20.1+cu121`, CUDA ABI `12.1`,
 Transformers `4.44.2`, `ultralytics-opencv-headless` `8.4.100`, Setuptools `81.0.0`, OpenCV,
 SAM 2, and LaMa imports. This is CPU-only compatibility evidence; it does not prove CUDA device
@@ -842,32 +843,38 @@ Task 1, read-only preflight, found:
 
 - Project `project-5909a738-2fdc-451e-ad6` exposes `g2-standard-4` in `us-central1-c` with four
   vCPUs, 16,384 MiB RAM, and one NVIDIA L4.
-- The regional CPU quota is 32 with zero in use. The regional quota response does not contain an
-  `NVIDIA_L4_GPUS` allocation, so L4 quota is **not confirmed** and must be granted or explicitly
-  verified before any Batch submission. Do not discover this by launching a job.
-- Batch and Compute Engine APIs are enabled. `logging.googleapis.com` was not present in the enabled
-  service list and should be enabled before the acceptance job so its structured evidence reaches
-  Cloud Logging.
+- The regional CPU quota is 32 with zero in use. Quota preference
+  `compute-us-central1-nvidia-l4` requests one on-demand NVIDIA L4 in `us-central1`, but Google
+  granted `0` with the state detail that it cannot grant the requested value at this moment. This
+  is a hard submission gate; no Batch GPU job may be submitted until the granted value is at least
+  one.
+- Batch, Compute Engine, Cloud Logging, and Cloud Quotas APIs are enabled. The Google-managed Batch
+  service identity has `roles/batch.serviceAgent`.
 - `default` and `infringement-vpc` exist. The latter has the private
   `cloud-run-private-subnet` (`10.10.0.0/26`) with Private Google Access enabled; the final Batch
   template must select its network/subnetwork explicitly and still provide the egress needed by
   automatic GPU-driver installation.
-- No dedicated GPU worker service account exists. The only user-managed candidates are the default
-  Compute service account and `infringement@...`; neither should be silently reused. Create a
-  least-privilege GPU worker service account before Task 4.
+- Dedicated service account `watermark-gpu-worker@project-5909a738-2fdc-451e-ad6.iam.gserviceaccount.com`
+  exists. It has model-object read, data-object read/create, Artifact Registry read, and log-writer
+  access; it has no project editor, storage admin, Batch submission, or service-account-key role.
 
 Task 2 is implemented in code. `PipelineExecutor` reports each production stage's initialization
 and release duration. `GpuAcceptanceRecorder`, attached only when the default GPU runtime is
 assembled, emits `gpu_acceptance_started` and `gpu_stage_lifecycle` structured records containing
 the CUDA device/version, current and peak CUDA allocator bytes, peak process RAM, and work-disk
 used/free bytes. Dependency-light fakes test this path; PyTorch and Transformers were not installed
-locally. The published digest above predates this instrumentation, so a new CPU-built immutable
-image digest is required before Task 4.
+locally. The latest immutable image above contains this instrumentation and the packaged
+`configs/watermark-v1.yaml` and `model-manifest.json` required by Batch execution.
 
-Task 3's manifest tooling is implemented, but actual manifests cannot be created yet because the
-private data bucket currently contains build evidence only and no operator-approved smoke images.
-After placing the approved images under each deterministic job prefix, create a local inventory
-containing their pinned GCS metadata (do not download them merely to generate the manifests):
+Task 3's manifest tooling is implemented. Five intentionally low-quality repository PNGs were
+copied into private, deterministic job prefixes. `gpu-acceptance/input-inventory.json` records the
+exact generations and SHA-256 checksums, while the checked-in one- and five-image manifests both
+pass the production manifest validator. Their pinned GCS identities are:
+
+- One image: `gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_one_20260719t090500z/input-manifest.json`, generation `1784452037999378`.
+- Five images: `gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_20260719t090500z/input-manifest.json`, generation `1784452046042662`.
+
+The general inventory shape remains:
 
 ```json
 {
@@ -900,6 +907,22 @@ python -m watermark_worker.smoke_manifests \
 
 This creates `one-image-manifest.json` from the first entry and `five-image-manifest.json` from all
 five. It writes deterministic output prefixes and performs no GCS reads or writes.
+
+### GPU acceptance Tasks 4-5 checkpoint (2026-07-19)
+
+Task 4's non-GPU setup is complete. `gpu-acceptance/batch-one-image.json` pins the latest digest,
+manifest generation, `g2-standard-4`, `STANDARD`, `NO_RESERVATION`, `us-central1-c`, the dedicated
+service account, explicit default network/subnetwork, automatic driver installation, one task,
+zero retries, a 90-minute timeout, a 200 GB balanced boot disk, and Cloud Logging. Contract tests
+prevent those bounds from drifting. It has **not** been submitted because granted L4 quota is zero.
+
+Task 5's validation boundary is recorded in `gpu-acceptance/README.md`. It checks model/runtime
+loading, CUDA/L4 identity, stage lifecycle, detections, masks, annotations, results, completion
+markers, GCS generations, and VM cleanup. It explicitly does not judge visual detection, mask, or
+inpainting accuracy. Live validation remains blocked until Task 4 can submit the one-image job.
+
+At this checkpoint there are no Batch jobs, Compute Engine VMs, or persistent disks in the project;
+there is no active GPU or compute runtime charge.
 
 ### Google Cloud resource and cost checkpoint (2026-07-19)
 
