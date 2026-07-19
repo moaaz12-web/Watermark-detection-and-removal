@@ -13,7 +13,7 @@ Convert the validated watermark-removal notebook pipeline into a versioned, test
 
 The first production milestone is:
 
-> Given a five-image manifest, one Google Cloud Batch task creates an on-demand `g2-standard-4` VM, runs the worker with its L4 GPU, writes deterministic per-image results to Cloud Storage, resumes safely after interruption, and exits successfully without manual intervention.
+> Given a five-image manifest, one Google Cloud Batch task creates an on-demand `n1-standard-4` VM with one attached T4 GPU, runs the worker, writes deterministic per-image results to Cloud Storage, resumes safely after interruption, and exits successfully without manual intervention.
 
 This document covers only the worker and its Batch runtime. FastAPI integration is specified separately in [02-fastapi-integration.md](02-fastapi-integration.md).
 
@@ -72,7 +72,7 @@ The worker receives an immutable manifest stored in Cloud Storage. It does not q
 
 ### 3.4 One Batch task and one GPU initially
 
-Version 1 runs one worker task on one `g2-standard-4` VM with one L4 GPU. It initializes each selected model stage once and processes all items sequentially.
+Version 1 runs one worker task on one `n1-standard-4` VM with one attached T4 GPU. It initializes each selected model stage once and processes all items sequentially. This target was selected after the pipeline ran successfully on a Colab T4; L4/G2 is not required for the current setup milestone.
 
 Creating one task per image is explicitly out of scope because repeated model initialization would waste time and GPU capacity.
 
@@ -463,7 +463,7 @@ production model registry.
 
 The worker image must:
 
-- Use a supported Linux AMD64 CUDA/PyTorch base compatible with the L4 driver.
+- Use a supported Linux AMD64 CUDA/PyTorch base compatible with the T4 driver.
 - Run as a non-root user.
 - Include application code and pinned runtime dependencies.
 - Use a deterministic entrypoint.
@@ -492,14 +492,14 @@ reachable finding requires remediation or a named, time-bounded exception before
 Initial runtime configuration:
 
 ```text
-Machine type:         g2-standard-4 (4 vCPU, 16 GB RAM, 1 x 24 GB NVIDIA L4)
+Machine type:         n1-standard-4 (4 vCPU, 15 GB RAM) + 1 x 16 GB NVIDIA T4
 Provisioning model:   STANDARD (on-demand)
 Reservation policy:   NO_RESERVATION
 Tasks / parallelism:  1 / 1
 Task timeout:         20 hours
 Retries:              maxRetryCount: 1, only worker exit codes 6 and 7
 Boot disk:            200 GB for the first benchmark; resize only from measured evidence
-Locations:            Explicit approved L4-capable zone(s), selected after quota/capacity validation
+Locations:            Explicit approved T4-capable zone(s), selected after quota/capacity validation
 Identity:             Explicit dedicated GPU worker service account; never the Compute default account
 Networking:           Approved VPC; Private Google Access/Cloud NAT or equivalent for required services
 Logs:                 Cloud Logging
@@ -507,7 +507,7 @@ Logs:                 Cloud Logging
 
 The initial staging job uses `installGpuDrivers: true` with a supported OS, explicit network egress for the driver installation, and the immutable worker-image digest. Google Batch requires this field for automatic driver installation; the field defaults to `false`. If the production network cannot allow that dependency, the production job must instead use a tested custom VM image with GPU drivers and the NVIDIA Container Toolkit, and set `installGpuDrivers: false`. See [Google's GPU Batch guidance](https://docs.cloud.google.com/batch/docs/create-run-job-gpus).
 
-Manual Batch submission must be proven before FastAPI integration. The first benchmark is a capacity gate, not proof that this is the final VM shape: `g2-standard-4` supplies 16 GB system RAM and 24 GB GPU memory. Record peak system RAM, VRAM, disk, startup time, and five-image runtime before retaining or increasing the shape. See [G2 machine specifications](https://docs.cloud.google.com/compute/docs/gpus).
+Manual Batch submission must be proven before FastAPI integration. The first benchmark is a capacity gate, not proof that this is the final VM shape: `n1-standard-4` supplies 15 GB system RAM and the attached T4 supplies 16 GB GPU memory. Record peak system RAM, VRAM, disk, startup time, and five-image runtime before retaining or increasing the shape. See [GPU machine specifications](https://docs.cloud.google.com/compute/docs/gpus).
 
 The Batch template must explicitly set the service account, `installGpuDrivers`, `machineType`, `provisioningModel`, `reservation`, allowed locations, task timeout, retry lifecycle policy, network, and digest image URI. Do not rely on Batch defaults.
 
@@ -615,7 +615,7 @@ Unit tests must not require a GPU.
 ### Batch acceptance test
 
 - Submit the image digest manually to Batch.
-- Confirm the task uses an L4.
+- Confirm the task uses a T4.
 - Confirm artifacts and output manifest are written.
 - Confirm only the compatible job `_COMPLETE.json` allows the manifest to be consumed.
 - Confirm the VM is deleted after completion.
@@ -678,7 +678,7 @@ Acceptance:
 Verify:
 
 - [x] Dependency-light tests prove sequential model lifecycle and acceptance-metric emission.
-- [ ] GPU smoke test proves the same lifecycle on L4 hardware and records real peak resource use.
+- [ ] GPU smoke test proves the same lifecycle on T4 hardware and records real peak resource use.
 
 Local implementation checkpoint (2026-07-18):
 
@@ -791,7 +791,7 @@ Local implementation checkpoint (2026-07-18):
   and passes read-only, network-disabled CLI and replay smoke tests. Its pragmatic security gate
   reports zero fixable high/critical findings and zero secrets. The full 2026-07-18 report contains
   22 currently unfixed Debian findings; they are production-review items under ADR-002, not silent
-  allowlist entries. CUDA/L4, approved models, SIGTERM checkpointing, and Batch remain deferred.
+  allowlist entries. CUDA/T4, approved models, SIGTERM checkpointing, and Batch remain deferred.
 
 ### Handoff checkpoint for the next agent (2026-07-19)
 
@@ -803,11 +803,11 @@ changes and review the complete diff before committing.
 | Workstream | Code/build status | Still deferred or required |
 | --- | --- | --- |
 | W3 Phase A | Complete. Production provider, generation/checksum-verified model cache, safe bundle preparation, compact masks, lazy model adapters, safety-gated LaMa, and sequential stage release are implemented and dependency-light tested. | Actual selected-model execution has not run on CUDA hardware. |
-| W3 Phase B | Complete at the CPU-image-verification level. The dependency lock, digest-pinned CUDA/PyTorch base, private image, runtime import/CUDA ABI gate, read-only validation/replay checks, and dependency-light GPU acceptance instrumentation are implemented. Security scanning is not part of W3. | Rebuild the immutable image with the acceptance instrumentation, then run CUDA/L4 one- and five-image smoke tests and collect the emitted measurements. |
+| W3 Phase B | Complete at the CPU-image-verification level. The dependency lock, digest-pinned CUDA/PyTorch base, private image, runtime import/CUDA ABI gate, read-only validation/replay checks, and dependency-light GPU acceptance instrumentation are implemented. Security scanning is not part of W3. | Run CUDA/T4 one- and five-image smoke tests and collect the emitted measurements. |
 | W4 | Code implementation complete. The full local pipeline path and production assembly boundary are tested. | Run an operator-selected smoke manifest and inspect real model decisions/artifacts after W3 GPU authorization. |
 | W5 | Code implementation complete. Five-item batching, interruption, resumability, corrupt-item isolation, and zero-stage replay are tested with reference stages. | Repeat five-item/interruption acceptance with approved production stages on the target GPU. |
 | W6 | Code implementation complete. Generation-pinned GCS reads, conditional writes, markers, collision handling, and stale-marker rejection are tested hermetically. | Opt-in live-GCS acceptance against isolated prefixes; this does not require a GPU but must use approved test paths. |
-| W7 | Reference-container implementation complete and its historical reference-image security gate passed. The GPU image also passed non-root, read-only, network-disabled CPU validation/replay. | Repeat smoke, SIGTERM checkpoint, and CUDA/L4 checks on the target GPU. No GPU-image scan is required by W3. |
+| W7 | Reference-container implementation complete and its historical reference-image security gate passed. The GPU image also passed non-root, read-only, network-disabled CPU validation/replay. | Repeat smoke, SIGTERM checkpoint, and CUDA/T4 checks on the target GPU. No GPU-image scan is required by W3. |
 
 The latest immutable CPU-verified image, including acceptance instrumentation and packaged runtime
 configuration/model manifest, is:
@@ -841,13 +841,14 @@ Batch submission, GPU connection, model download, or local heavyweight dependenc
 
 Task 1, read-only preflight, found:
 
-- Project `project-5909a738-2fdc-451e-ad6` exposes `g2-standard-4` in `us-central1-c` with four
-  vCPUs, 16,384 MiB RAM, and one NVIDIA L4.
-- The regional CPU quota is 32 with zero in use. Quota preference
-  `compute-us-central1-nvidia-l4` requests one on-demand NVIDIA L4 in `us-central1`, but Google
-  granted `0` with the state detail that it cannot grant the requested value at this moment. This
-  is a hard submission gate; no Batch GPU job may be submitted until the granted value is at least
-  one.
+- The original preflight found `g2-standard-4` in `us-central1-c`, but Google denied the request
+  for one L4. On 2026-07-19 the operator changed the acceptance target to one T4 because the same
+  pipeline had already run successfully on a Colab T4.
+- T4 is exposed in `us-central1-a`, `us-central1-b`, `us-central1-c`, and `us-central1-f`. The
+  bounded Batch contract uses `n1-standard-4` plus one `nvidia-tesla-t4` in `us-central1-c`.
+- The regional CPU quota is 32 with zero in use. The on-demand `NVIDIA_T4_GPUS` quota was observed
+  at `0` before the T4 request. This is a hard submission gate; no Batch GPU job may be submitted
+  until Google grants at least one on-demand T4 in `us-central1`.
 - Batch, Compute Engine, Cloud Logging, and Cloud Quotas APIs are enabled. The Google-managed Batch
   service identity has `roles/batch.serviceAgent`.
 - `default` and `infringement-vpc` exist. The latter has the private
@@ -911,13 +912,13 @@ five. It writes deterministic output prefixes and performs no GCS reads or write
 ### GPU acceptance Tasks 4-5 checkpoint (2026-07-19)
 
 Task 4's non-GPU setup is complete. `gpu-acceptance/batch-one-image.json` pins the latest digest,
-manifest generation, `g2-standard-4`, `STANDARD`, `NO_RESERVATION`, `us-central1-c`, the dedicated
+manifest generation, `n1-standard-4` with one `nvidia-tesla-t4`, `STANDARD`, `NO_RESERVATION`, `us-central1-c`, the dedicated
 service account, explicit default network/subnetwork, automatic driver installation, one task,
 zero retries, a 90-minute timeout, a 200 GB balanced boot disk, and Cloud Logging. Contract tests
-prevent those bounds from drifting. It has **not** been submitted because granted L4 quota is zero.
+prevent those bounds from drifting. It has **not** been submitted because granted T4 quota is zero.
 
 Task 5's validation boundary is recorded in `gpu-acceptance/README.md`. It checks model/runtime
-loading, CUDA/L4 identity, stage lifecycle, detections, masks, annotations, results, completion
+loading, CUDA/T4 identity, stage lifecycle, detections, masks, annotations, results, completion
 markers, GCS generations, and VM cleanup. It explicitly does not judge visual detection, mask, or
 inpainting accuracy. Live validation remains blocked until Task 4 can submit the one-image job.
 
@@ -1033,15 +1034,15 @@ Verify:
 - [x] Local container smoke and completed-job replay pass.
 - [x] The ADR-002 automated gate reports no secrets and no fixable high/critical vulnerabilities.
 - [ ] Review or remediate the 22 unfixed Debian findings before promoting a production image.
-- [ ] Run the GPU image smoke test, SIGTERM checkpoint test, and CUDA/L4 checks after W3 receives
+- [ ] Run the GPU image smoke test, SIGTERM checkpoint test, and CUDA/T4 checks after W3 receives
   explicit GPU authorization.
 
 ### W8. Submit a manual Batch GPU job
 
 Acceptance:
 
-- Batch creates an on-demand `g2-standard-4` VM.
-- CUDA and L4 detection succeed.
+- Batch creates an on-demand `n1-standard-4` VM with one attached T4.
+- CUDA and T4 detection succeed.
 - A five-image manifest completes and writes a compatible output manifest and job completion marker.
 - Batch removes the VM after completion.
 
@@ -1072,7 +1073,7 @@ Worker foundation is complete when:
 - Retries skip compatible completed items.
 - Blocked or unverified items never run LaMa and never expose a preprocessing image as final output.
 - Manifest, source, item marker, and job marker identities are generation- and checksum-verified.
-- A manual Google Cloud Batch L4 execution succeeds.
+- A manual Google Cloud Batch T4 execution succeeds.
 - Runtime and resource measurements support the chosen VM shape.
 - No API database or user-authentication secret is present in the worker.
 
@@ -1083,5 +1084,5 @@ infrastructure values must still be supplied by the environment owner and must n
 during implementation:
 
 - Artifact retention, lifecycle, and deletion policy for originals, masks, annotations, and final images.
-- Approved VPC, L4-capable zone(s), quota/capacity result, and service-account identities.
+- Approved VPC, T4-capable zone(s), quota/capacity result, and service-account identities.
 - Benchmark evidence confirming the VM shape and boot-disk size, or the approved larger replacement.

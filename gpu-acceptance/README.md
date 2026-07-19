@@ -5,9 +5,10 @@ not an accuracy or product-quality evaluation.
 
 ## Current gate
 
-Google Cloud quota preference `compute-us-central1-nvidia-l4` requests one on-demand NVIDIA L4 in
-`us-central1`, but Google granted `0` on 2026-07-19. No Batch GPU job has been submitted. Do not
-submit `batch-one-image.json` until the granted value is at least one.
+The acceptance target is one on-demand NVIDIA T4 attached to `n1-standard-4` in `us-central1-c`.
+The earlier L4/G2 target was dropped because the same pipeline already ran successfully on a T4 in
+Colab. The project currently reports a T4 quota limit of `0`; do not submit
+`batch-one-image.json` until Google grants at least one on-demand T4 in `us-central1`.
 
 The corrected CPU build `ee4d4eca-3e2f-4def-9a36-6d65cf31b8e6` passed and published:
 
@@ -32,7 +33,7 @@ repository's ignored `images/` directory.
 
 Pass the one-image run when all of the following are true:
 
-- Batch reports `SUCCEEDED`, the container exits `0`, and the allocated device is an NVIDIA L4.
+- Batch reports `SUCCEEDED`, the container exits `0`, and the allocated device is an NVIDIA T4.
 - CUDA is available and RMBG, combined YOLO/GroundingDINO/SAM 2 detection, and LaMa initialize
   without an import, checkpoint, CUDA, or memory failure.
 - Structured lifecycle evidence shows initialized and released stages in the expected order.

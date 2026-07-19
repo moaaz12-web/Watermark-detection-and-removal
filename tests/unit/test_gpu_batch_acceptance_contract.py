@@ -51,9 +51,10 @@ def test_one_image_batch_job_pins_gpu_identity_network_and_logging() -> None:
 
     assert instance["installGpuDrivers"] is True
     assert policy == {
-        "machineType": "g2-standard-4",
+        "machineType": "n1-standard-4",
         "provisioningModel": "STANDARD",
         "reservation": "NO_RESERVATION",
+        "accelerators": [{"type": "nvidia-tesla-t4", "count": 1}],
         "bootDisk": {"type": "pd-balanced", "sizeGb": 200},
     }
     assert allocation["location"]["allowedLocations"] == ["zones/us-central1-c"]

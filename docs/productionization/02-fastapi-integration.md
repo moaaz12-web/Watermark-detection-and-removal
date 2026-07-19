@@ -10,11 +10,11 @@ Implementation order: After the GPU worker foundation
 
 Phase 6 adds an authenticated, durable watermark-removal job workflow to the existing FastAPI backend after the worker described in [01-gpu-worker-setup.md](01-gpu-worker-setup.md) has passed a manual Google Cloud Batch GPU execution.
 
-The backend remains the authority for users, authorization, application job state, and result access. It does not run model inference. The existing Cloud Run Jobs mechanism performs short-lived orchestration, and Google Cloud Batch creates the temporary L4 VM that runs the GPU worker.
+The backend remains the authority for users, authorization, application job state, and result access. It does not run model inference. The existing Cloud Run Jobs mechanism performs short-lived orchestration, and Google Cloud Batch creates the temporary T4 VM that runs the GPU worker.
 
 The first backend milestone is:
 
-> An authorized user creates a watermark job for owned assets, FastAPI stores a durable application job and immutable GCS manifest, Google accepts a Cloud Run orchestration execution, that execution submits one Google Cloud Batch L4 job, and the user can retrieve a final `SUCCEEDED` or `FAILED` state and authorized result references from FastAPI.
+> An authorized user creates a watermark job for owned assets, FastAPI stores a durable application job and immutable GCS manifest, Google accepts a Cloud Run orchestration execution, that execution submits one Google Cloud Batch T4 job, and the user can retrieve a final `SUCCEEDED` or `FAILED` state and authorized result references from FastAPI.
 
 ## 2. Prerequisites
 
@@ -25,7 +25,7 @@ Do not begin this integration until the worker foundation has demonstrated all o
 - The production pipeline configuration and model files are pinned.
 - A container image processes local and GCS manifests.
 - The worker is idempotent at item level.
-- A manual on-demand `g2-standard-4` Batch execution succeeds.
+- A manual on-demand `n1-standard-4` Batch execution with one attached T4 succeeds.
 - Representative runtime, VRAM, RAM, and output quality have been measured.
 
 If those conditions are not met, changes to the backend schema and API are likely to be based on guesses.
@@ -53,7 +53,7 @@ Cloud Run orchestration job
           |
           v
 Google Cloud Batch
-  |- creates on-demand g2-standard-4 VM
+  |- creates on-demand n1-standard-4 VM with one T4
   |- installs/activates NVIDIA driver
   |- pulls immutable GPU worker image
   `- runs one worker task
@@ -507,7 +507,7 @@ The orchestration job performs these steps:
 1. Validate required environment variables.
 2. Construct the deterministic Batch job ID from the application job ID.
 3. Build a Batch request using approved server configuration.
-4. Submit the Batch job with one `g2-standard-4`, one task, and the immutable worker image digest.
+4. Submit the Batch job with one `n1-standard-4` and one attached T4, one task, and the immutable worker image digest.
 5. If the deterministic Batch job already exists, treat that as an idempotent replay and retrieve it.
 6. Report the Batch resource name through the approved internal event/callback path.
 7. Exit `0` after submission is confirmed.
@@ -655,7 +655,9 @@ Needs:
 GCP_PROJECT_ID
 GCP_BATCH_REGION
 GCP_BATCH_ALLOWED_LOCATIONS
-GCP_BATCH_MACHINE_TYPE=g2-standard-4
+GCP_BATCH_MACHINE_TYPE=n1-standard-4
+GCP_BATCH_ACCELERATOR_TYPE=nvidia-tesla-t4
+GCP_BATCH_ACCELERATOR_COUNT=1
 GCP_BATCH_PROVISIONING_MODEL=STANDARD
 GCP_BATCH_SERVICE_ACCOUNT
 WATERMARK_WORKER_IMAGE_DIGEST
@@ -804,7 +806,7 @@ POST application job
   -> PostgreSQL records
   -> GCS input manifest
   -> Cloud Run execution
-  -> Batch L4 task
+  -> Batch T4 task
   -> GPU worker output
   -> callback/reconciliation
   -> GET application job returns SUCCEEDED
@@ -879,7 +881,7 @@ Verify:
 
 Acceptance:
 
-- The orchestrator submits the approved worker digest to one on-demand `g2-standard-4` Batch task.
+- The orchestrator submits the approved worker digest to one on-demand `n1-standard-4` Batch task with one attached T4.
 - Batch job ID is deterministic.
 - Duplicate orchestration is idempotent.
 - Stable submission events are reported.
@@ -964,7 +966,7 @@ FastAPI integration is complete when:
 - Batch success is validated against a compatible output manifest.
 - Cancellation and retry are idempotent.
 - GCS result access is authorized and temporary.
-- End-to-end staging tests pass through a real L4 Batch execution.
+- End-to-end staging tests pass through a real T4 Batch execution.
 - Logs, alerts, quotas, and budget controls are in place before broad rollout.
 
 ## 26. Open decisions before B1
