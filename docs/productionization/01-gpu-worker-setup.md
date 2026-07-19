@@ -866,21 +866,30 @@ image digest is required before Task 4.
 
 Task 3's manifest tooling is implemented, but actual manifests cannot be created yet because the
 private data bucket currently contains build evidence only and no operator-approved smoke images.
-After uploading exactly five approved images, create a local inventory containing their pinned GCS
-metadata (do not download them merely to generate the manifests):
+After placing the approved images under each deterministic job prefix, create a local inventory
+containing their pinned GCS metadata (do not download them merely to generate the manifests):
 
 ```json
-[
-  {
+{
+  "oneImage": {
     "itemId": "asset_1",
-    "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu-acceptance/inputs/asset_1.png",
+    "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_one_TIMESTAMP/asset_1.png",
     "inputGeneration": "GCS_GENERATION",
     "sourceChecksumSha256": "LOWERCASE_SHA256_FROM_THE_UPLOAD"
-  }
-]
+  },
+  "fiveImages": [
+    {
+      "itemId": "asset_1",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/gpu_smoke_five_TIMESTAMP/asset_1.png",
+      "inputGeneration": "GCS_GENERATION",
+      "sourceChecksumSha256": "LOWERCASE_SHA256_FROM_THE_UPLOAD"
+    }
+  ]
+}
 ```
 
-The real inventory must contain exactly five entries. Generate both validated manifests with:
+The real `fiveImages` array must contain exactly five entries. Generate both validated manifests
+with:
 
 ```bash
 python -m watermark_worker.smoke_manifests \

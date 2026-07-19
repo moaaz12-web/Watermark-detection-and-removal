@@ -25,7 +25,8 @@ class SmokeManifestPaths:
 
 def write_smoke_manifests(
     *,
-    inputs: list[SmokeInput],
+    one_input: SmokeInput,
+    five_inputs: list[SmokeInput],
     destination: Path,
     tenant_id: str,
     output_bucket: str,
@@ -33,7 +34,7 @@ def write_smoke_manifests(
     created_at: datetime,
 ) -> SmokeManifestPaths:
     """Create one- and five-image manifests from pinned metadata without downloading images."""
-    if len(inputs) != 5:
+    if len(five_inputs) != 5:
         raise ValueError("GPU smoke manifest generation requires exactly five approved inputs")
     if created_at.tzinfo is None or created_at.utcoffset() is None:
         raise ValueError("created_at must include a timezone")
@@ -41,7 +42,7 @@ def write_smoke_manifests(
     timestamp = created_at.astimezone(UTC).strftime("%Y%m%dt%H%M%Sz").lower()
     destination.mkdir(parents=True, exist_ok=True)
     one = _manifest(
-        inputs=inputs[:1],
+        inputs=[one_input],
         job_id=f"gpu_smoke_one_{timestamp}",
         tenant_id=tenant_id,
         output_bucket=output_bucket,
@@ -49,7 +50,7 @@ def write_smoke_manifests(
         created_at=created_at,
     )
     five = _manifest(
-        inputs=inputs,
+        inputs=five_inputs,
         job_id=f"gpu_smoke_five_{timestamp}",
         tenant_id=tenant_id,
         output_bucket=output_bucket,
@@ -86,8 +87,7 @@ def _manifest(
                 input_uri=item.input_uri,
                 input_generation=item.input_generation,
                 output_prefix=(
-                    f"gs://{output_bucket}/gpu-acceptance/{tenant_id}/{job_id}/"
-                    f"{item.item_id}/"
+                    f"gs://{output_bucket}/{tenant_id}/{job_id}/{item.item_id}/"
                 ),
                 source_checksum_sha256=item.source_checksum_sha256,
             )
@@ -106,20 +106,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-bucket", required=True)
     parser.add_argument("--pipeline-version", default="watermark-v1")
     args = parser.parse_args(argv)
-    rows = json.loads(args.inventory.read_text())
-    if not isinstance(rows, list):
-        raise ValueError("smoke input inventory must be a JSON array")
-    inputs = [
-        SmokeInput(
+    inventory = json.loads(args.inventory.read_text())
+    if not isinstance(inventory, dict):
+        raise ValueError("smoke input inventory must be a JSON object")
+
+    def parse_input(row: object) -> SmokeInput:
+        if not isinstance(row, dict):
+            raise ValueError("each smoke input must be a JSON object")
+        return SmokeInput(
             item_id=row["itemId"],
             input_uri=row["inputUri"],
             input_generation=row["inputGeneration"],
             source_checksum_sha256=row["sourceChecksumSha256"],
         )
-        for row in rows
-    ]
+
+    one_input = parse_input(inventory["oneImage"])
+    five_rows = inventory["fiveImages"]
+    if not isinstance(five_rows, list):
+        raise ValueError("fiveImages must be a JSON array")
+    five_inputs = [parse_input(row) for row in five_rows]
     paths = write_smoke_manifests(
-        inputs=inputs,
+        one_input=one_input,
+        five_inputs=five_inputs,
         destination=args.destination,
         tenant_id=args.tenant_id,
         output_bucket=args.output_bucket,

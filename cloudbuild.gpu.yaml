@@ -130,13 +130,11 @@ steps:
             --tmpfs /tmp/watermark-worker:rw,noexec,nosuid,size=64m,mode=1777,uid=10001,gid=10001 \
             --mount "type=bind,src=$fixture,dst=/work,readonly" \
             --mount "type=bind,src=$output,dst=/output" \
-            --mount type=bind,src=/workspace/configs,dst=/config,readonly \
-            --mount type=bind,src=/workspace/model-manifest.json,dst=/model-manifest.json,readonly \
             "$image" \
             --manifest-path /work/manifest.json \
             --local-output-root /output \
-            --config /config/watermark-v1.yaml \
-            --model-manifest /model-manifest.json \
+            --config /app/configs/watermark-v1.yaml \
+            --model-manifest /app/model-manifest.json \
             --validate-only
         }
         run_validation

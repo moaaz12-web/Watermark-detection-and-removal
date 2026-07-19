@@ -71,6 +71,8 @@ def test_gpu_container_packages_source_without_models_or_runtime_fetches() -> No
     content = gpu_dockerfile()
 
     assert "src ./src" in content
+    assert "configs ./configs" in content
+    assert "model-manifest.json ./model-manifest.json" in content
     assert "sam2.1_hiera_large.pt" not in content
     assert "yolo11x-train28-best.pt" not in content
     assert "big-lama.zip" not in content

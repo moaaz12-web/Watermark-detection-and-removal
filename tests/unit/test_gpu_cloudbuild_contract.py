@@ -73,6 +73,10 @@ def test_gpu_image_build_verifies_runtime_without_claiming_gpu_acceptance() -> N
     assert content.count("mode=1777,uid=10001,gid=10001") == 3
     assert "10001:10001" in content
     assert "GPU smoke" in content
+    assert "--config /app/configs/watermark-v1.yaml" in content
+    assert "--model-manifest /app/model-manifest.json" in content
+    assert "src=/workspace/configs" not in content
+    assert "src=/workspace/model-manifest.json" not in content
 
 
 def test_ultralytics_config_parent_is_the_writable_runtime_tmpfs() -> None:
