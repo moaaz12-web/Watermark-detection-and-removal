@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import tomllib
 from pathlib import Path
 
@@ -29,6 +30,24 @@ def test_vendored_lama_checkpoint_patch_is_preserved() -> None:
     assert "def _torch_load_compat" in loader
     assert "weights_only=False" in loader
     assert "state = _torch_load_compat(path, map_location)" in loader
+
+
+def test_vendored_lama_predict_only_import_does_not_load_training_data() -> None:
+    trainers = LAMA_ROOT / "training" / "trainers"
+    top_level_imports: set[str] = set()
+
+    for filename in ("base.py", "default.py"):
+        module = ast.parse((trainers / filename).read_text())
+        for node in module.body:
+            if isinstance(node, ast.Import):
+                top_level_imports.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                top_level_imports.add(node.module)
+
+    assert "saicinpainting.training.data.datasets" not in top_level_imports
+    assert "saicinpainting.evaluation" not in top_level_imports
+    assert "saicinpainting.training.losses.distance_weighting" not in top_level_imports
+    assert "saicinpainting.training.losses.perceptual" not in top_level_imports
 
 
 def test_vendored_lama_is_included_in_the_worker_wheel() -> None:

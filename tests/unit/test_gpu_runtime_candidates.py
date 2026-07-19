@@ -13,7 +13,7 @@ def test_gpu_runtime_candidates_are_exact_and_immutable() -> None:
     candidates = tomllib.loads(CANDIDATES_PATH.read_text(encoding="utf-8"))
 
     assert candidates["schema_version"] == 1
-    assert candidates["status"] == "candidate-unverified"
+    assert candidates["status"] == "cpu-image-verified"
     assert candidates["python"] == "3.11"
     assert candidates["cuda"] == "12.1"
     assert candidates["packages"]["transformers"] == "4.44.2"
@@ -33,6 +33,14 @@ def test_gpu_runtime_candidates_are_exact_and_immutable() -> None:
 
     rmbg = candidates["sources"]["rmbg"]
     assert re.fullmatch(r"[0-9a-f]{64}", rmbg["revision"])
+
+    verification = candidates["verification"]
+    assert verification["image_uri"].endswith(
+        "@sha256:a5064be9496c40d7a39a873ee946fb234b7709b2608faa5d309c8bdd13a9e8b1"
+    )
+    assert verification["runtime_imports"] == "passed-cpu-only"
+    assert "security_scan" not in verification
+    assert verification["gpu_smoke"] == "not-run"
 
 
 def test_lightweight_project_does_not_include_gpu_candidates() -> None:

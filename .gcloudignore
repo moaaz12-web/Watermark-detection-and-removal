@@ -1,0 +1,13 @@
+# Keep Cloud Build source uploads small and free of local credentials and model data.
+*
+!.gcloudignore
+!Dockerfile.gpu
+!cloudbuild.gpu-lock.yaml
+!cloudbuild.gpu.yaml
+!requirements-gpu.in
+!requirements-gpu.lock
+!model-manifest.json
+!configs/
+!configs/**
+!src/
+!src/**

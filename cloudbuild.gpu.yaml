@@ -1,0 +1,163 @@
+substitutions:
+  _GPU_BASE_IMAGE: >-
+    docker.io/pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime@sha256:831247999fbf7e08f61b3e39f6d77ee434f38f6f07f769d00db451e853878067
+  _IMAGE_REPOSITORY: >-
+    us-central1-docker.pkg.dev/project-5909a738-2fdc-451e-ad6/watermark-worker
+
+steps:
+  - id: build-gpu-worker-image
+    name: >-
+      gcr.io/cloud-builders/docker@sha256:4a33059c95a600582497fac50780c1c4f68388338fb54002a95b99af85b8f651
+    env:
+      - DOCKER_BUILDKIT=1
+    args:
+      - build
+      - --platform=linux/amd64
+      - --build-arg
+      - GPU_BASE_IMAGE=${_GPU_BASE_IMAGE}
+      - --tag
+      - ${_IMAGE_REPOSITORY}/watermark-worker:$BUILD_ID
+      - --file
+      - Dockerfile.gpu
+      - .
+
+  - id: verify-runtime-imports-and-cuda-abi
+    name: >-
+      gcr.io/cloud-builders/docker@sha256:4a33059c95a600582497fac50780c1c4f68388338fb54002a95b99af85b8f651
+    entrypoint: /bin/sh
+    args:
+      - -ceu
+      - |
+        image="${_IMAGE_REPOSITORY}/watermark-worker:$BUILD_ID"
+        mkdir -p /workspace/task4-evidence
+        docker image inspect "$image" > /workspace/task4-evidence/image-inspect.json
+        configured_user="$(docker image inspect --format '{{.Config.User}}' "$image")"
+        test "$configured_user" = "10001:10001"
+        docker run --rm \
+          --network none \
+          --read-only \
+          --tmpfs /tmp/watermark-worker:rw,noexec,nosuid,size=256m,mode=1777,uid=10001,gid=10001 \
+          --entrypoint python \
+          "$image" \
+          -c '
+        import importlib.metadata as metadata
+        import json
+        import pkg_resources
+        import torch
+        import torchvision
+        import transformers
+        import ultralytics
+        import cv2
+        import sam2
+        import saicinpainting
+        from sam2.build_sam import build_sam2
+        from saicinpainting.training.trainers import load_checkpoint
+        from torchvision.ops import nms
+
+        expected = {
+            "torch": "2.5.1+cu121",
+            "torchvision": "0.20.1+cu121",
+            "transformers": "4.44.2",
+            "ultralytics-opencv-headless": "8.4.100",
+            "setuptools": "81.0.0",
+        }
+        actual = {name: metadata.version(name) for name in expected}
+        assert actual == expected, (actual, expected)
+        assert torch.version.cuda == "12.1", torch.version.cuda
+        kept = nms(
+            torch.tensor([[0.0, 0.0, 2.0, 2.0]]),
+            torch.tensor([0.9]),
+            0.5,
+        )
+        assert kept.tolist() == [0]
+        print(json.dumps({
+            "packages": actual,
+            "pythonCudaAbi": torch.version.cuda,
+            "opencv": cv2.__version__,
+            "sam2Import": sam2.__name__,
+            "lamaImport": saicinpainting.__name__,
+        }, sort_keys=True))
+        ' > /workspace/task4-evidence/runtime-versions.json
+        # This CPU-only check deliberately does not run the GPU smoke test.
+
+  - id: validate-only-and-completed-replay
+    name: >-
+      gcr.io/cloud-builders/docker@sha256:4a33059c95a600582497fac50780c1c4f68388338fb54002a95b99af85b8f651
+    entrypoint: /bin/sh
+    args:
+      - -ceu
+      - |
+        image="${_IMAGE_REPOSITORY}/watermark-worker:$BUILD_ID"
+        fixture=/workspace/.cloudbuild-gpu-fixture
+        output=/workspace/.cloudbuild-gpu-output
+        mkdir -p "$fixture/inputs" "$output"
+        chmod 0777 "$fixture" "$fixture/inputs" "$output"
+        docker run --rm \
+          --network none \
+          --read-only \
+          --tmpfs /tmp/watermark-worker:rw,noexec,nosuid,size=64m,mode=1777,uid=10001,gid=10001 \
+          --mount "type=bind,src=$fixture,dst=/fixture" \
+          --entrypoint python \
+          "$image" \
+          -c '
+        import hashlib
+        import json
+        from pathlib import Path
+        from PIL import Image
+
+        root = Path("/fixture")
+        source = root / "inputs" / "asset_0.png"
+        Image.new("RGB", (4, 4), "blue").save(source)
+        manifest = {
+            "schemaVersion": 1,
+            "jobId": "cloudbuild_task4",
+            "tenantId": "build_verification",
+            "pipelineVersion": "watermark-v1",
+            "createdAt": "2026-07-19T00:00:00Z",
+            "items": [{
+                "itemId": "asset_0",
+                "inputPath": "inputs/asset_0.png",
+                "outputPrefix": "build_verification/cloudbuild_task4/asset_0/",
+                "sourceChecksumSha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            }],
+        }
+        (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        '
+        run_validation() {
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp/watermark-worker:rw,noexec,nosuid,size=64m,mode=1777,uid=10001,gid=10001 \
+            --mount "type=bind,src=$fixture,dst=/work,readonly" \
+            --mount "type=bind,src=$output,dst=/output" \
+            --mount type=bind,src=/workspace/configs,dst=/config,readonly \
+            --mount type=bind,src=/workspace/model-manifest.json,dst=/model-manifest.json,readonly \
+            "$image" \
+            --manifest-path /work/manifest.json \
+            --local-output-root /output \
+            --config /config/watermark-v1.yaml \
+            --model-manifest /model-manifest.json \
+            --validate-only
+        }
+        run_validation
+        # A second --validate-only invocation proves the completed replay path.
+        run_validation
+        test -f "$output/build_verification/cloudbuild_task4/asset_0/_COMPLETE.json"
+        test -f "$output/build_verification/cloudbuild_task4/_COMPLETE.json"
+
+images:
+  - ${_IMAGE_REPOSITORY}/watermark-worker:$BUILD_ID
+
+artifacts:
+  objects:
+    location: >-
+      gs://project-5909a738-2fdc-451e-ad6-watermark-data/cloud-build/gpu-images/$BUILD_ID/
+    paths:
+      - task4-evidence/*
+
+options:
+  machineType: E2_STANDARD_2
+  diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: 3600s

@@ -58,7 +58,13 @@ def test_gpu_container_requires_phase_b_immutable_build_inputs() -> None:
     assert "requirements-gpu.lock" in content
     assert "uv pip sync" in content
     assert "--require-hashes" in content
+    assert "--torch-backend cu121" in content
     assert "SAM2_BUILD_CUDA=0" in content
+    assert "YOLO_CONFIG_DIR=/tmp/watermark-worker" in content
+    assert "YOLO_CONFIG_DIR=/tmp/watermark-worker/ultralytics" not in content
+    assert "--no-install-recommends" in content
+    assert "libgl1 libglib2.0-0" in content
+    assert "rm -rf /var/lib/apt/lists/*" in content
 
 
 def test_gpu_container_packages_source_without_models_or_runtime_fetches() -> None:

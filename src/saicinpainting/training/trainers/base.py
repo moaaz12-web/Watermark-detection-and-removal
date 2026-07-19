@@ -9,12 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DistributedSampler
 
-from saicinpainting.evaluation import make_evaluator
-from saicinpainting.training.data.datasets import make_default_train_dataloader, make_default_val_dataloader
-from saicinpainting.training.losses.adversarial import make_discrim_loss
-from saicinpainting.training.losses.perceptual import PerceptualLoss, ResNetPL
-from saicinpainting.training.modules import make_generator, make_discriminator
-from saicinpainting.training.visualizers import make_visualizer
+from saicinpainting.training.modules import make_generator
 from saicinpainting.utils import add_prefix_to_keys, average_dicts, set_requires_grad, flatten_dict, \
     get_has_ddp_rank
 
@@ -71,6 +66,15 @@ class BaseInpaintingTrainingModule(ptl.LightningModule):
             LOGGER.info(f'Generator\n{self.generator}')
 
         if not predict_only:
+            # Modified by watermark-worker: these are training-only dependencies.
+            # Import them lazily so the packaged inference runtime does not require
+            # datasets, evaluators, or perceptual-loss assets.
+            from saicinpainting.evaluation import make_evaluator
+            from saicinpainting.training.losses.adversarial import make_discrim_loss
+            from saicinpainting.training.losses.perceptual import PerceptualLoss, ResNetPL
+            from saicinpainting.training.modules import make_discriminator
+            from saicinpainting.training.visualizers import make_visualizer
+
             self.save_hyperparameters(self.config)
             self.discriminator = make_discriminator(**self.config.discriminator)
             self.adversarial_loss = make_discrim_loss(**self.config.losses.adversarial)
@@ -122,6 +126,8 @@ class BaseInpaintingTrainingModule(ptl.LightningModule):
         ]
 
     def train_dataloader(self):
+        from saicinpainting.training.data.datasets import make_default_train_dataloader
+
         kwargs = dict(self.config.data.train)
         if self.use_ddp:
             kwargs['ddp_kwargs'] = dict(num_replicas=self.trainer.num_nodes * self.trainer.num_processes,
@@ -131,6 +137,8 @@ class BaseInpaintingTrainingModule(ptl.LightningModule):
         return dataloader
 
     def val_dataloader(self):
+        from saicinpainting.training.data.datasets import make_default_val_dataloader
+
         res = [make_default_val_dataloader(**self.config.data.val)]
 
         if self.config.data.visual_test is not None:

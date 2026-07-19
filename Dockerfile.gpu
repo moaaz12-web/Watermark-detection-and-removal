@@ -16,8 +16,11 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY requirements-gpu.lock ./
 RUN uv venv --python python /app/.venv \
-    && uv pip sync --python /app/.venv/bin/python --require-hashes requirements-gpu.lock
+    && uv pip sync --python /app/.venv/bin/python --require-hashes \
+        --torch-backend cu121 requirements-gpu.lock
 
+# Ultralytics appends its own /Ultralytics directory to YOLO_CONFIG_DIR, so
+# this must name the writable parent mounted by the read-only runtime checks.
 FROM ${GPU_BASE_IMAGE} AS runtime
 
 ENV HOME=/home/watermark-worker \
@@ -27,9 +30,14 @@ ENV HOME=/home/watermark-worker \
     PYTHONUNBUFFERED=1 \
     TMPDIR=/tmp/watermark-worker \
     WM_MODEL_WORK_ROOT=/tmp/watermark-worker/models \
+    YOLO_CONFIG_DIR=/tmp/watermark-worker \
     SAM2_BUILD_CUDA=0
 
-RUN groupadd --gid 10001 watermark-worker \
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends \
+        libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 watermark-worker \
     && useradd --uid 10001 --gid 10001 --create-home \
         --home-dir /home/watermark-worker watermark-worker \
     && mkdir -p /tmp/watermark-worker/models \

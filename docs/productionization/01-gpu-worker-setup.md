@@ -1,9 +1,9 @@
 # GPU Watermark Worker: Production Setup Plan
 
-Status: W1, W2, and W4-W7 implementation complete — production acceptance remains gated by W0,
-W3, and the deferred live/GPU checks
+Status: W1, W2, and W4-W7 code implementation complete; W3 Phase A and CPU-only Phase B complete;
+production acceptance remains gated by W0 and the deferred live-GCS, GPU, and Batch checks
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 Implementation order: First
 
@@ -705,10 +705,10 @@ Local implementation checkpoint (2026-07-18):
   lifecycle stage explicitly releases its model references and CUDA allocator/IPC memory.
 - The binary safety mask uses an immutable one-byte-per-pixel raster. This bounds a 16-megapixel
   mask at about 16 MB of mask payload instead of representing millions of Python coordinate tuples.
-- `gpu-runtime-candidates.toml` records exact candidate versions for the future GPU image and pins
-  the SAM 2 and LaMa source revisions to immutable commit SHAs. It is deliberately marked
-  `candidate-unverified`: it is not part of `uv.lock` and must not be treated as a release lock until
-  the dependencies have been resolved, hash-locked, built, and exercised in the GPU image.
+- `gpu-runtime-candidates.toml` records the exact image dependency versions and pins the SAM 2 and
+  LaMa source revisions to immutable commit SHAs. It is marked `cpu-image-verified`: the remote
+  CPU build resolved a hash-locked environment and passed import/ABI and read-only CLI checks, but
+  it is not GPU-accepted and must not be treated as a production release image.
 - The RMBG runtime uses Transformers with `local_files_only=True` and `trust_remote_code=True`
   against the checksum-verified, generation-pinned local bundle. This preserves the notebook's
   custom-model loading behavior without permitting a runtime network fetch. A dependency-light
@@ -717,29 +717,37 @@ Local implementation checkpoint (2026-07-18):
   `786f5936b27fb3dacd2b1ad799e4de968ea697e7` with its Apache-2.0 license and provenance. The
   maintained checkpoint patch explicitly passes `weights_only=False` for the trusted,
   checksum-verified checkpoint and falls back for older PyTorch call signatures. Tests preserve
-  the revision, license, wheel inclusion, and patch contract.
+  the revision, license, wheel inclusion, and patch contract. Its training-only dataset, evaluator,
+  and perceptual-loss imports are deferred on the `predict_only` path so inference does not require
+  `webdataset` or the unbundled training assets. PyTorch Lightning 1.9 still requires
+  `pkg_resources`, so the image pins Setuptools 81.0.0; Setuptools 82 and newer removed that API.
 - Phase B local preparation packages the SAM 2 Python runtime and YAML configurations from commit
   `2b90b9f5ceec907a1c18123530e92e794ad901a4` under `src/sam2`, with its Apache-2.0 license and
   provenance. The optional CUDA extension is excluded, matching the notebook's
   `SAM2_BUILD_CUDA=0` setup; the checkpoint remains a generation-pinned GCS artifact.
 - `requirements-gpu.in` contains the direct Linux AMD64/Python 3.11/CUDA 12.1 compatibility
-  candidates. It is not a release lock. Task 4 must resolve `requirements-gpu.lock` with hashes on
-  the remote builder and verify the resulting imports before the candidate status can change.
-- `Dockerfile.gpu` is the fail-closed GPU image recipe. It has no default base image and consumes
-  the intentionally absent `requirements-gpu.lock`, so it cannot be built accidentally before
-  Task 4 supplies a reviewed digest-pinned CUDA/PyTorch base and the generated lock. It packages
-  source but no model weights, installs no code at runtime, and runs as UID/GID 10001.
+  inputs. Task 4 resolved `requirements-gpu.lock` remotely with SHA-256 hashes; the lock file SHA-256
+  is `805c08d08e544a15f429d0b1badd48ba3c2654414244d5bae27fe6aa4d4c692d`.
+- `Dockerfile.gpu` is the fail-closed GPU image recipe. It has no default base image and uses the
+  reviewed PyTorch 2.5.1/CUDA 12.1 base at digest
+  `sha256:831247999fbf7e08f61b3e39f6d77ee434f38f6f07f769d00db451e853878067` plus the generated
+  hash lock. It packages source but no model weights, installs no code at runtime, and runs as
+  UID/GID 10001.
 - When inference is requested without an injected test executor, the CLI now assembles the
   production executor from the generation-pinned model cache, safe bundle cache, and local GPU
   provider. Assembly occurs only when at least one valid, incomplete item needs inference;
   validation-only runs, corrupt-only batches, and completed replays do not import GPU dependencies
   or materialize models. `WM_MODEL_WORK_ROOT` can override the model cache root; otherwise it uses
   `$TMPDIR/models`.
-- Phase A and Phase B Tasks 1-3 are complete. The candidate GPU dependency set deliberately remains
-  outside the lightweight lock until Task 4 resolves and tests it in the GPU image.
-- Per operator direction, this checkpoint did not install PyTorch, Transformers, Ultralytics,
-  SAM 2, LaMa, or their transitive dependencies; download model files; connect to a GPU; start or
-  rent a GPU; submit a Batch job; or run the GPU smoke test.
+- Phase A and Phase B Tasks 1-4 are complete at the CPU image-verification level. Cloud Build
+  `3be291ae-be70-4d8b-9e97-5a93e0979cb7` passed the runtime import/CUDA ABI check and two read-only,
+  network-disabled validation/replay runs, then published the private 6,497,389,279-byte image as
+  `us-central1-docker.pkg.dev/project-5909a738-2fdc-451e-ad6/watermark-worker/watermark-worker@sha256:a5064be9496c40d7a39a873ee946fb234b7709b2608faa5d309c8bdd13a9e8b1`.
+- Per operator direction, security scanning was removed entirely from W3 and is not a W3 acceptance
+  requirement. The GPU image build contains no scanner step and makes no scanning claim.
+- This checkpoint installed the heavy dependencies only in the remote CPU-built image. It did not
+  install them locally; download model files; connect to, start, or rent a GPU; submit a Batch job;
+  or run the GPU smoke test.
 
 ### Current status (W1-W7)
 
@@ -754,16 +762,16 @@ Local implementation checkpoint (2026-07-18):
   `finalUri`; it intentionally does not load models or run inference. Unit and integration tests
   cover valid, invalid, duplicate, unsupported, replaced-generation, and checksum-mismatched
   manifest execution.
-- W3's Phase A code-level implementation and Phase B local preparation Tasks 1-3 are complete, but
-  W3 remains open until its image and GPU acceptance checks pass. Enabled artifacts stream from
+- W3's Phase A code-level implementation and Phase B CPU image work are complete, but W3 remains
+  open until its GPU acceptance checks pass. Enabled artifacts stream from
   pinned GCS generations into a checksum-validated cache; safe bundle preparation, compact safety
   masks, CUDA preflight, typed local runtime-provider assembly, lazy production stage adapters,
   sequential release, and the no-LaMa-on-blocked path are covered by dependency-light tests. The
-  RMBG source-vendoring requirement is intentionally deferred under ADR-003. The candidate GPU
-  dependency input and fail-closed GPU Dockerfile are committed locally, while the final lock
-  hashes, reviewed base-image digest, remote image build, import verification, scan, and immutable
-  image digest remain Task 4. The provider still needs resource measurements and its
-  prohibited-for-now GPU smoke test. No GPU or Batch operation was performed for this checkpoint.
+  RMBG source-vendoring requirement is intentionally deferred under ADR-003. The dependency lock,
+  reviewed base-image digest, private remote image build, CPU-only import verification, replay
+  checks, and immutable image digest are recorded. The provider still needs resource measurements
+  and its prohibited-for-now GPU smoke test. No GPU or Batch operation was performed for this
+  checkpoint.
 - W4's local orchestration implementation is complete against a deterministic, test-only reference
   executor. It exercises decoded input through safety-gated inpainting, writes the documented
   artifacts and structured results. The production CLI now assembles the real local provider when
@@ -782,6 +790,91 @@ Local implementation checkpoint (2026-07-18):
   reports zero fixable high/critical findings and zero secrets. The full 2026-07-18 report contains
   22 currently unfixed Debian findings; they are production-review items under ADR-002, not silent
   allowlist entries. CUDA/L4, approved models, SIGTERM checkpointing, and Batch remain deferred.
+
+### Handoff checkpoint for the next agent (2026-07-19)
+
+The current worktree is on branch `watermark_pipeline`. Commit `2c6708a` contains W3 Phase B Tasks
+1-3. The Task 4 lock, image-build configuration, runtime fixes, evidence records, and documentation
+described below are present in the worktree but are not committed yet. Preserve unrelated user
+changes and review the complete diff before committing.
+
+| Workstream | Code/build status | Still deferred or required |
+| --- | --- | --- |
+| W3 Phase A | Complete. Production provider, generation/checksum-verified model cache, safe bundle preparation, compact masks, lazy model adapters, safety-gated LaMa, and sequential stage release are implemented and dependency-light tested. | Actual selected-model execution has not run on CUDA hardware. |
+| W3 Phase B | Complete at the CPU-image-verification level. The dependency lock, digest-pinned CUDA/PyTorch base, private image, runtime import/CUDA ABI gate, and read-only validation/replay checks passed. Security scanning is not part of W3. | CUDA/L4 smoke, one- and five-image model runs, stage-lifecycle observation, and peak VRAM/RAM/disk/init-time measurements. |
+| W4 | Code implementation complete. The full local pipeline path and production assembly boundary are tested. | Run an operator-selected smoke manifest and inspect real model decisions/artifacts after W3 GPU authorization. |
+| W5 | Code implementation complete. Five-item batching, interruption, resumability, corrupt-item isolation, and zero-stage replay are tested with reference stages. | Repeat five-item/interruption acceptance with approved production stages on the target GPU. |
+| W6 | Code implementation complete. Generation-pinned GCS reads, conditional writes, markers, collision handling, and stale-marker rejection are tested hermetically. | Opt-in live-GCS acceptance against isolated prefixes; this does not require a GPU but must use approved test paths. |
+| W7 | Reference-container implementation complete and its historical reference-image security gate passed. The GPU image also passed non-root, read-only, network-disabled CPU validation/replay. | Repeat smoke, SIGTERM checkpoint, and CUDA/L4 checks on the target GPU. No GPU-image scan is required by W3. |
+
+The immutable CPU-verified image is:
+
+```text
+us-central1-docker.pkg.dev/project-5909a738-2fdc-451e-ad6/watermark-worker/watermark-worker@sha256:a5064be9496c40d7a39a873ee946fb234b7709b2608faa5d309c8bdd13a9e8b1
+```
+
+Cloud Build `3be291ae-be70-4d8b-9e97-5a93e0979cb7` is the successful publication build. Its evidence
+is under
+`gs://project-5909a738-2fdc-451e-ad6-watermark-data/cloud-build/gpu-images/3be291ae-be70-4d8b-9e97-5a93e0979cb7/`.
+The runtime evidence records PyTorch `2.5.1+cu121`, torchvision `0.20.1+cu121`, CUDA ABI `12.1`,
+Transformers `4.44.2`, `ultralytics-opencv-headless` `8.4.100`, Setuptools `81.0.0`, OpenCV,
+SAM 2, and LaMa imports. This is CPU-only compatibility evidence; it does not prove CUDA device
+availability, GPU kernels, model correctness, performance, or memory capacity.
+
+Operator constraints at this checkpoint:
+
+- Do not create, rent, start, or connect to a GPU VM; submit a Batch GPU job; or run the GPU smoke
+  test without new explicit operator authorization.
+- Do not install PyTorch, Transformers, or the heavy GPU dependency set on the local workstation.
+- Security scanning is explicitly outside W3 scope by operator decision. Do not add it back to W3,
+  block GPU acceptance on it, or describe the image as scanned.
+- OWLv2 remains disabled. GroundingDINO and YOLO remain enabled together, followed by SAM 2 and
+  LaMa, as frozen in `configs/watermark-v1.yaml`.
+
+### Google Cloud resource and cost checkpoint (2026-07-19)
+
+Read-only inventory after Task 4 found no active Cloud Builds, Compute Engine instances, persistent
+disks, or `us-central1` Batch jobs. No GPU resource exists or is accruing runtime charges. Merely
+enabling APIs, retaining service accounts/IAM roles, or retaining an empty repository does not
+create compute charges.
+
+Resources that remain and can accrue storage charges:
+
+| Resource | Observed stored size | Cost/retention notes |
+| --- | ---: | --- |
+| Private Artifact Registry `watermark-worker` | 6,497.428 MB reported by GCP (6,497,389,279-byte image plus small provenance records) | Immutable tags; automatic vulnerability scanning disabled; no cleanup policy observed. Approximately 6.05 GiB remains billable until deleted. |
+| `watermark-models` bucket | 5,706,688,651 bytes (~5.315 GiB) | Regional Standard storage in `us-central1`; seven-day soft delete; no lifecycle rule observed. |
+| `watermark-data` bucket | 415,474 bytes | Build locks/evidence are negligible; seven-day soft delete; no lifecycle rule observed. |
+| Cloud Build source bucket | 3,730,341 bytes | `US` multi-region; future source archives accumulate because no lifecycle rule was observed. |
+
+All three buckets use uniform bucket-level access and their IAM policies contain no `allUsers` or
+`allAuthenticatedUsers` grant; none is public. Soft-deleted bytes are charged like live bytes during
+the seven-day soft-delete window. No objects were deleted as part of this checkpoint.
+
+At the published rates checked on 2026-07-19, approximate ongoing storage is:
+
+- Artifact Registry: about `$0.56/month` if the billing account's 0.5 GiB free allowance is
+  available, or about `$0.61/month` without it.
+- Cloud Storage: about `$0.006/month` if the account is eligible for and has the 5 GiB
+  `us-central1` Always Free allowance available, or about `$0.107/month` without that allowance.
+- Combined ongoing storage: approximately `$0.56-$0.72/month`, depending on billing-account-wide
+  free-tier usage. Operations and future data transfer can add small variable charges.
+
+The six currently queryable final Task 4 builds used about 49.66 `E2_STANDARD_2` build-minutes,
+whose list price is about `$0.30`. This is normally `$0` when the billing account still has its
+2,500 monthly free build-minutes, but only Cloud Billing can confirm the actual invoice because free
+allowances are shared across projects. The final successful build used the first 100 GB build disk,
+which is included in the Cloud Build allowance. There is no ongoing Cloud Build charge after a
+build reaches a terminal state.
+
+Project billing is enabled. Budget/alert status could not be verified: the Cloud Billing Budget API
+is disabled and the current account does not have permission to list billing-account budgets. The
+API was not enabled during this checkpoint. Do not assume a budget alert or hard spending cap
+exists; an authorized billing administrator should confirm or create alerts in Cloud Billing.
+
+Pricing references: [Cloud Build](https://cloud.google.com/build/pricing),
+[Artifact Registry](https://cloud.google.com/artifact-registry/pricing), and
+[Cloud Storage](https://cloud.google.com/storage/pricing).
 
 ### [x] W4. Extract one complete local pipeline path
 
@@ -847,8 +940,8 @@ Verify:
 - [x] Local container smoke and completed-job replay pass.
 - [x] The ADR-002 automated gate reports no secrets and no fixable high/critical vulnerabilities.
 - [ ] Review or remediate the 22 unfixed Debian findings before promoting a production image.
-- [ ] Replace the reference Python base with the approved CUDA/PyTorch GPU base and repeat the scan,
-  smoke test, SIGTERM checkpoint test, and CUDA/L4 checks after W3.
+- [ ] Run the GPU image smoke test, SIGTERM checkpoint test, and CUDA/L4 checks after W3 receives
+  explicit GPU authorization.
 
 ### W8. Submit a manual Batch GPU job
 
