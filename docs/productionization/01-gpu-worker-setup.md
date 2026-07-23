@@ -1,9 +1,10 @@
 # GPU Watermark Worker: Production Setup Plan
 
-Status: W1, W2, and W4-W7 code implementation complete; W3 Phase A and CPU-only Phase B complete;
-production acceptance remains gated by W0 and the deferred live-GCS, GPU, and Batch checks
+Status: W1, W2, and W4-W7 code implementation complete; W3 Phase A, CPU-only Phase B, and
+GPU-acceptance preparation complete. W3 live Tasks 4-8 are blocked by zero T4/global GPU quota;
+live-GCS acceptance and broader production rollout remain deferred.
 
-Last updated: 2026-07-19
+Last updated: 2026-07-24
 
 Implementation order: First
 
@@ -785,7 +786,8 @@ Local implementation checkpoint (2026-07-18):
 - W6's implementation is complete. The GCS CLI path, generation-aware storage adapter, conditional
   artifact and marker writes, stable storage-error classification, replay behavior, collision
   handling, and stale-marker rejection are covered by a persistent fake GCS backend. The opt-in
-  real-GCS acceptance test remains deferred until isolated bucket prefixes and credentials exist.
+  real-GCS acceptance test remains deferred. Isolated acceptance prefixes and authenticated
+  project access now exist, but the live test has not been run.
 - W7's reference-container implementation is complete. The AMD64 image uses digest-pinned Python
   and uv inputs, installs from `uv.lock`, removes runtime packaging tools, runs as UID/GID 10001,
   and passes read-only, network-disabled CLI and replay smoke tests. Its pragmatic security gate
@@ -793,12 +795,19 @@ Local implementation checkpoint (2026-07-18):
   22 currently unfixed Debian findings; they are production-review items under ADR-002, not silent
   allowlist entries. CUDA/T4, approved models, SIGTERM checkpointing, and Batch remain deferred.
 
-### Handoff checkpoint for the next agent (2026-07-19)
+### Handoff checkpoint for the next agent (2026-07-24)
 
-The current worktree is on branch `watermark_pipeline`. Commit `2c6708a` contains W3 Phase B Tasks
-1-3. The Task 4 lock, image-build configuration, runtime fixes, evidence records, and documentation
-described below are present in the worktree but are not committed yet. Preserve unrelated user
-changes and review the complete diff before committing.
+The current worktree is on branch `watermark_pipeline`. The implementation, image-build inputs,
+runtime fixes, acceptance instrumentation, pinned manifests, T4 Batch contract, and quota-gate
+documentation described below are committed. The latest relevant commits are:
+
+- `175cc40`: GPU acceptance evidence and instrumentation.
+- `e818f96`: packaged GPU runtime configuration.
+- `9daf1e8`: bounded one-image acceptance job.
+- `cc17470`: switch the acceptance target from L4/G2 to T4/N1.
+- `27f0f4d`: record the denied T4 quota retry.
+
+Preserve unrelated user changes and review the complete diff before making follow-up changes.
 
 | Workstream | Code/build status | Still deferred or required |
 | --- | --- | --- |
@@ -826,8 +835,9 @@ availability, GPU kernels, model correctness, performance, or memory capacity.
 
 Operator constraints at this checkpoint:
 
-- Do not create, rent, start, or connect to a GPU VM; submit a Batch GPU job; or run the GPU smoke
-  test without new explicit operator authorization.
+- The operator has authorized the bounded T4 acceptance sequence in Tasks 4-8 once both required
+  GPU quotas are granted. Do not increase the machine/GPU count, retries, timeout, or test scope
+  beyond the checked-in contract without new authorization.
 - Do not install PyTorch, Transformers, or the heavy GPU dependency set on the local workstation.
 - Security scanning is explicitly outside W3 scope by operator decision. Do not add it back to W3,
   block GPU acceptance on it, or describe the image as scanned.
@@ -911,25 +921,34 @@ python -m watermark_worker.smoke_manifests \
 This creates `one-image-manifest.json` from the first entry and `five-image-manifest.json` from all
 five. It writes deterministic output prefixes and performs no GCS reads or writes.
 
-### GPU acceptance Tasks 4-5 checkpoint (2026-07-19)
+### GPU acceptance Tasks 4-8 checkpoint (2026-07-24)
 
-Task 4's non-GPU setup is complete. `gpu-acceptance/batch-one-image.json` pins the latest digest,
-manifest generation, `n1-standard-4` with one `nvidia-tesla-t4`, `STANDARD`, `NO_RESERVATION`,
-`us-central1-c`, the dedicated service account, explicit default network/subnetwork, automatic
-driver installation, one task, zero retries, a 90-minute timeout, a 200 GB balanced boot disk, and
-Cloud Logging. Contract tests
-prevent those bounds from drifting. It has **not** been submitted because both the regional T4 and
-project-wide total-GPU granted quotas are zero after the 2026-07-19 retry.
+The client confirmed that billing account `01CFC5-E41BC1-082150` was upgraded from Free Trial to a
+paid account on 2026-07-19. Paid billing removed the Free Trial restriction but did not grant GPU
+quota. Google immediately denied repeated requests for value `1`, and the 2026-07-24 read-only
+check still reports:
 
-Task 5's validation boundary is recorded in `gpu-acceptance/README.md`. It checks model/runtime
-loading, CUDA/T4 identity, stage lifecycle, detections, masks, annotations, results, completion
-markers, GCS generations, and VM cleanup. It explicitly does not judge visual detection, mask, or
-inpainting accuracy. Live validation remains blocked until Task 4 can submit the one-image job.
+- Regional CPU quota in `us-central1`: limit `32`, usage `0`.
+- Standard `NVIDIA_T4_GPUS` quota in `us-central1`: limit `0`, usage `0`.
+- Project-wide `GPUS_ALL_REGIONS`: limit `0`, usage `0`.
+- Standard T4 quota in every queried region: limit `0`.
 
-At this checkpoint there are no Batch jobs, Compute Engine VMs, or persistent disks in the project;
-there is no active GPU or compute runtime charge.
+Both GPU quota limits must be at least one. Moving to another region does not bypass the global
+limit or the project's zero regional T4 quotas. The remaining route is Google Support/Sales manual
+review or later quota eligibility; do not repeatedly submit identical automated requests.
 
-### Google Cloud resource and cost checkpoint (2026-07-19)
+| Task | Status | Remaining work |
+| --- | --- | --- |
+| 4. Submit bounded one-image T4 job | **Blocked by quota; non-GPU setup complete.** `gpu-acceptance/batch-one-image.json` pins the immutable image/manifest, `n1-standard-4` plus one T4, `STANDARD`, `NO_RESERVATION`, `us-central1-c`, the dedicated service account, explicit network, automatic drivers, one task, zero retries, 90-minute timeout, 200 GB balanced disk, and Cloud Logging. | After both quotas are granted, submit the checked-in job and monitor it to a terminal state. Do not enlarge the configured resources. |
+| 5. Validate one-image execution | **Prepared, not run.** The acceptance boundary is in `gpu-acceptance/README.md`. | Confirm CUDA/T4 and required model loading, stage lifecycle, detections, masks, annotations, result/marker generations, output manifest, and VM cleanup. Do not evaluate visual accuracy. |
+| 6. Run five-image execution | **Manifest prepared, not run.** The private five-image manifest and exact generation are pinned above. | Create the equivalent bounded Batch submission using the five-image manifest, run all five items in one process, confirm one initialization per stage, and record runtime/RAM/VRAM/disk measurements. |
+| 7. Prove interruption and resume | **Dependency-light behavior is tested; live GPU proof not run.** | Interrupt a bounded run after at least one terminal item marker, resubmit safely, and prove completed items are skipped while incomplete work resumes without invalid overwrites. |
+| 8. Close acceptance evidence | **Not started because Tasks 4-7 have no live execution.** | Record job IDs/states, image digest, manifest/object generations, logs, resource measurements, actual cost, and cleanup; confirm no VM/disk remains; update this document and close W3 only if all required checks pass. |
+
+As of 2026-07-24 there are no Batch jobs in `us-central1`, Compute Engine VMs, persistent disks, or
+active Cloud Builds in the project. No GPU or compute runtime charge is active.
+
+### Historical Google Cloud resource and cost checkpoint (2026-07-19)
 
 Read-only inventory after Task 4 found no active Cloud Builds, Compute Engine instances, persistent
 disks, or `us-central1` Batch jobs. No GPU resource exists or is accruing runtime charges. Merely

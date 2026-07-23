@@ -2,7 +2,7 @@
 
 Status: Proposed
 
-Last updated: 2026-07-17
+Last updated: 2026-07-24
 
 Implementation order: After the GPU worker foundation
 
@@ -26,9 +26,15 @@ Do not begin this integration until the worker foundation has demonstrated all o
 - A container image processes local and GCS manifests.
 - The worker is idempotent at item level.
 - A manual on-demand `n1-standard-4` Batch execution with one attached T4 succeeds.
-- Representative runtime, VRAM, RAM, and output quality have been measured.
+- Representative runtime, VRAM, RAM, and artifact-contract behavior have been measured. Visual
+  accuracy evaluation is outside the current setup milestone.
 
 If those conditions are not met, changes to the backend schema and API are likely to be based on guesses.
+
+Current gate (2026-07-24): the worker image and bounded T4/N1 Batch contract are prepared, but no
+manual GPU execution has occurred because both the `us-central1` standard T4 quota and the
+project-wide all-regions GPU quota remain zero. The paid billing upgrade does not itself satisfy
+this prerequisite; Google must grant both quota values before GPU acceptance can proceed.
 
 ## 3. System architecture
 

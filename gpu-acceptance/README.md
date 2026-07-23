@@ -3,14 +3,22 @@
 This directory records the bounded W3 one-image acceptance run. It is a system-integration check,
 not an accuracy or product-quality evaluation.
 
+Last verified: 2026-07-24
+
 ## Current gate
 
 The acceptance target is one on-demand NVIDIA T4 attached to `n1-standard-4` in `us-central1-c`.
 The earlier L4/G2 target was dropped because the same pipeline already ran successfully on a T4 in
-Colab. On 2026-07-19 Google immediately denied the retried requests for both required limits:
-`NVIDIA-T4-GPUS-per-project-region` in `us-central1` and `GPUS-ALL-REGIONS-per-project` remain at
-`0`. No Batch GPU job has been submitted. Do not submit `batch-one-image.json` until both granted
-values are at least one.
+Colab. The client confirmed that billing account `01CFC5-E41BC1-082150` was upgraded to a paid
+account on 2026-07-19. Google nevertheless denied repeated quota requests based on account/project
+eligibility. A read-only check on 2026-07-24 still reports both required limits at zero:
+
+- `NVIDIA-T4-GPUS-per-project-region` in `us-central1`: `0`.
+- `GPUS-ALL-REGIONS-per-project`: `0`.
+
+Every queried region also has standard T4 quota `0` for this project, so moving regions does not
+bypass the gate. No Batch GPU job has been submitted. Do not submit `batch-one-image.json` until
+both granted values are at least one.
 
 The corrected CPU build `ee4d4eca-3e2f-4def-9a36-6d65cf31b8e6` passed and published:
 
@@ -47,6 +55,16 @@ Pass the one-image run when all of the following are true:
 
 Do **not** assess whether boxes, masks, detections, or inpainting are visually accurate. Accuracy is
 explicitly outside this setup milestone.
+
+## Remaining Tasks 4-8
+
+| Task | Current state | Completion |
+| --- | --- | --- |
+| 4. One-image Batch job | Configuration and inputs are ready; blocked by both zero GPU quotas. | Submit only after both quota values are at least one. |
+| 5. One-image validation | Acceptance rules above are ready; no live run exists. | Validate model loading, pipeline/artifacts, generations, terminal state, and cleanup without judging accuracy. |
+| 6. Five-image run | Five-image manifest is pinned; Batch submission is not yet prepared or run. | Run one bounded worker process and collect lifecycle/resource measurements. |
+| 7. Interruption/resume | Hermetic resumability tests pass; no live GPU interruption test exists. | Interrupt after a completed item, resubmit, and prove safe skip/resume behavior. |
+| 8. Evidence and closure | No live GPU evidence exists. | Record jobs/logs/digests/generations/cost, verify VM/disk cleanup, update docs, and close W3 if acceptance passes. |
 
 ## Emergency stop
 
