@@ -1,10 +1,18 @@
 # Phase 6: FastAPI Watermark Job Orchestration Plan
 
-Status: Proposed
+Status: Provider-neutral portions proposed; Google Batch execution path superseded by the accepted
+AWS plan
 
 Last updated: 2026-07-24
 
 Implementation order: After the GPU worker foundation
+
+> **Provider update:** The public API, PostgreSQL authority, durable intent, authorization,
+> reconciliation, cancellation, and output-validation portions of this document remain applicable.
+> [03-aws-gpu-worker-setup.md](03-aws-gpu-worker-setup.md) supersedes the Google Batch/Cloud Run
+> submission details for the accepted initial provider. The initial AWS milestone permits at most
+> five images, stores provider-neutral execution fields, and sends the short Cloud Run orchestrator
+> to the authenticated AWS submission API rather than Google Batch.
 
 ## 1. Objective
 
@@ -375,11 +383,11 @@ GET /v1/watermark-jobs/{jobId}
   "id": "wm_123",
   "status": "RUNNING",
   "pipelineVersion": "watermark-v1",
-  "totalItems": 5000,
-  "processedItems": 1830,
-  "succeededItems": 1800,
-  "failedItems": 4,
-  "blockedItems": 26,
+  "totalItems": 5,
+  "processedItems": 3,
+  "succeededItems": 2,
+  "failedItems": 0,
+  "blockedItems": 1,
   "createdAt": "2026-07-17T10:00:00Z",
   "startedAt": "2026-07-17T10:04:00Z",
   "completedAt": null,
@@ -425,7 +433,7 @@ Use the existing API error format. If none exists, use one stable shape:
     "code": "WATERMARK_JOB_LIMIT_EXCEEDED",
     "message": "The job contains more images than your current limit allows.",
     "details": {
-      "maximumItems": 5000
+      "maximumItems": 5
     }
   }
 }
