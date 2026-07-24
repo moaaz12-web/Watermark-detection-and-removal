@@ -1,0 +1,18 @@
+environment        = "staging"
+aws_region         = "eu-north-1"
+aws_account_id     = "154959837939"
+gcp_project_id     = "project-5909a738-2fdc-451e-ad6"
+gcp_project_number = "834057675927"
+
+google_jwt_issuer      = "https://accounts.google.com"
+google_jwt_audience    = "urn:watermark:aws-gpu-submission:staging"
+
+approved_manifest_prefixes = [
+  "gs://OWNER_SUPPLIED_MANIFEST_BUCKET/OWNER_SUPPLIED_PREFIX/",
+]
+approved_output_prefixes = [
+  "gs://OWNER_SUPPLIED_OUTPUT_BUCKET/OWNER_SUPPLIED_PREFIX/",
+]
+
+pipeline_allowlist = ["watermark-v1"]
+submission_enabled = false

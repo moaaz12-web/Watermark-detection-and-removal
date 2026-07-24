@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "applicationJobId": "wm_123",
+  "manifestUri": "gs://approved-job-bucket/tenant_17/wm_123/input-manifest.json",
+  "manifestGeneration": "1721210400123456",
+  "outputManifestUri": "gs://approved-output-bucket/tenant_17/wm_123/output-manifest.json",
+  "pipelineVersion": "watermark-v1",
+  "requestSha256": "8851ff0e0f423af7a763e4a9d24dd13ddc97ff180a7a7916b3f9020c8138db4f"
+}

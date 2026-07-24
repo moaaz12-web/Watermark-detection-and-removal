@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "applicationJobId": "wm_123",
+  "provider": "AWS_BATCH",
+  "providerJobId": "00000000-0000-0000-0000-000000000000",
+  "providerJobArn": "arn:aws:batch:eu-north-1:154959837939:job/00000000-0000-0000-0000-000000000000",
+  "status": "RUNNING",
+  "providerAttempt": 1,
+  "submittedAt": "2026-07-24T10:00:00Z",
+  "startedAt": "2026-07-24T10:02:00Z"
+}

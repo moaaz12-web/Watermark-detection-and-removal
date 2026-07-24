@@ -7,6 +7,14 @@
 *.egg-info/
 .coverage
 htmlcov/
+**/.terraform/
+*.tfplan
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+services/aws_submission/build/
+services/aws_submission/dist/
 .env
 .env.*
 !.env.example

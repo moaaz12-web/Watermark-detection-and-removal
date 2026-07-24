@@ -12,6 +12,7 @@ from watermark_worker.contracts import (
     InputManifest,
     ItemResult,
     ItemStatus,
+    OutputManifest,
     exit_code_for_error,
 )
 
@@ -163,3 +164,48 @@ def test_error_codes_map_to_documented_process_exit_codes(
     error: ErrorCode, expected: ExitCode
 ) -> None:
     assert exit_code_for_error(error) is expected
+
+
+def test_item_result_accepts_additive_aws_provider_metadata() -> None:
+    payload = result_payload(ItemStatus.SUCCEEDED, Decision.INPAINTED)
+    payload.update(
+        {
+            "finalUri": "gs://output-bucket/tenant_17/wm_123/asset_123/final.png",
+            "computeProvider": "AWS_BATCH",
+            "providerRegion": "eu-north-1",
+            "providerJobId": "00000000-0000-0000-0000-000000000000",
+            "providerAttempt": 1,
+            "futureProviderField": "ignored",
+        }
+    )
+
+    result = ItemResult.model_validate(payload)
+
+    assert result.compute_provider == "AWS_BATCH"
+    assert result.provider_region == "eu-north-1"
+    assert "futureProviderField" not in result.model_dump(by_alias=True)
+
+
+def test_output_manifest_ignores_unknown_additive_field() -> None:
+    payload = {
+        "schemaVersion": 1,
+        "jobId": "wm_123",
+        "tenantId": "tenant_17",
+        "pipelineVersion": "watermark-v1",
+        "workerImageDigest": f"sha256:{SHA}",
+        "configSha256": SHA,
+        "modelManifestSha256": "b" * 64,
+        "manifest": {
+            "uri": "gs://job-bucket/tenant_17/wm_123/input-manifest.json",
+            "generation": "1",
+            "checksumSha256": "c" * 64,
+        },
+        "counts": {"total": 0, "succeeded": 0, "failed": 0, "blocked": 0, "skipped": 0},
+        "items": [],
+        "completedAt": datetime.now(UTC).isoformat(),
+        "futureProviderField": {"ignored": True},
+    }
+
+    output = OutputManifest.model_validate(payload)
+
+    assert "futureProviderField" not in output.model_dump(by_alias=True)

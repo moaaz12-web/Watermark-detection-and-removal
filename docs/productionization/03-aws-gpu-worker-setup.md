@@ -1,6 +1,7 @@
 # AWS GPU Watermark Worker: Hybrid Production Setup Plan
 
-Status: Active implementation plan; A0 and A1 complete, A2 is next
+Status: Active implementation plan; A0, A1, and A3 complete. A2 is complete in this repository,
+with the external FastAPI repository mirror still pending.
 
 Last updated: 2026-07-24
 
@@ -70,15 +71,15 @@ Current GCP project `project-5909a738-2fdc-451e-ad6`:
 | Watermark data | GCS bucket `project-5909a738-2fdc-451e-ad6-watermark-data`. |
 | Watermark models | GCS bucket `project-5909a738-2fdc-451e-ad6-watermark-models`. |
 | Worker images | Artifact Registry repository `watermark-worker` contains immutable image digests; the reviewed worker has CPU evidence but no completed live GPU acceptance. |
-| Identities | Existing `infringement` and `watermark-gpu-worker` service accounts are enabled. A dedicated orchestration identity/subject must still be selected for the AWS API. |
+| Identities | Existing `infringement` and `watermark-gpu-worker` service accounts are enabled. Dedicated orchestrator `watermark-aws-orchestrator` exists and its numeric subject is pinned by the AWS API. |
 | GCP GPU execution | No Compute Engine instances, persistent disks, or Google Batch jobs were present. |
 | GCP GPU quota | Regional NVIDIA T4 quota and project-wide `GPUS_ALL_REGIONS` quota were both `0`. |
 | Watermark FastAPI integration | The core backend exists; the watermark-specific tables, endpoints, durable provider orchestration, and reconciliation described by the productionization plans are not yet complete. |
 
 Current AWS status:
 
-- This repository contains the proposed document and ADR but no implemented `infra/aws/` or
-  `aws-acceptance/` artifacts yet.
+- A3 submission-boundary infrastructure is deployed from `infra/aws/`, and redacted verification
+  artifacts are stored under `aws-acceptance/evidence/`.
 - The authenticated AWS account identity was verified; the initial target account ends in `7939`.
 - `eu-north-1` (Europe/Stockholm) is formally selected for the initial implementation and GPU
   acceptance.
@@ -93,13 +94,16 @@ Current AWS status:
   email alerts at `$5`, `$15`, and `$25` and a forecasted-spend alert at `$25`. It has no automated
   actions, SNS topic, or paid report. Credits and refunds are excluded so promotional credits do not
   hide underlying resource usage.
-- Terraform with a versioned GCS backend is selected for the hybrid AWS/GCP infrastructure
-  runbook. Terraform is not currently installed on the implementation workstation.
+- Terraform `1.15.8` is installed and initialized with a versioned GCS backend using prefix
+  `watermark/aws/staging`; a post-deployment plan reports no changes.
 - The initial Batch network uses dedicated public subnets, ephemeral public IPv4 addresses, an
   internet gateway, and no inbound security-group rules. This avoids a permanently billed NAT
   gateway while retaining the outbound HTTPS path required for GCS and Google STS.
-- The dedicated GCP orchestration identity, exact numeric Google subject, WIF provider, and AWS
-  Batch job role still need to be created during A3/A4.
+- The dedicated GCP orchestration identity and exact numeric Google subject exist. The WIF provider
+  and AWS Batch job role remain A4 work.
+- The A3 API Gateway HTTP API, native Google JWT authorizer, submission Lambda, DynamoDB ledger,
+  redacted logs, throttling, and alarms are deployed in disabled-submit mode. The ledger is empty,
+  and no Batch, EC2, EBS, or NAT Gateway resource exists.
 - Staging DynamoDB idempotency retention is 90 days and CloudWatch log retention is 30 days.
 
 ## 3. Scope
@@ -1222,6 +1226,11 @@ Dependencies: A0.
 Purpose: freeze the data exchanged between the external FastAPI repository, GCP orchestrator,
 submission Lambda, AWS Batch job, and existing worker before deploying infrastructure.
 
+Status: Complete in this repository. The external FastAPI repository path was not available in this
+workspace, so its matching models, canonical hash, persistence fields, and five-item tests remain a
+required cross-repository follow-up. Evidence:
+[A2 contract verification](../../aws-acceptance/evidence/a2-contracts/contract-verification.txt).
+
 Fixed staging values used by A2-A11:
 
 | Setting | Value |
@@ -1368,9 +1377,9 @@ Acceptance:
 - [ ] `manifestGeneration` is present from FastAPI persistence through AWS worker invocation.
 - [ ] Submit/status/cancel schemas, normalized states, and stable errors are typed in both repos.
 - [ ] Canonical hashing produces the same value in both repositories.
-- [ ] Provider metadata remains additive to worker schema version 1.
+- [x] Provider metadata remains additive to worker schema version 1.
 - [ ] FastAPI contract tests enforce at most five items.
-- [ ] Unit, typing, and lint checks pass.
+- [x] Unit, typing, and lint checks pass in this repository.
 
 Dependencies: A0. Estimated scope: medium in each repository; complete as two focused sessions.
 
@@ -1378,6 +1387,9 @@ Dependencies: A0. Estimated scope: medium in each repository; complete as two fo
 
 Purpose: deploy the narrow authenticated API, Lambda, and idempotency ledger without yet creating or
 starting GPU compute.
+
+Status: Complete. Deployed to staging in `eu-north-1` with submission disabled. Evidence:
+[A3 submission boundary](../../aws-acceptance/evidence/a3-submission-boundary/).
 
 #### A3.1 Bootstrap Terraform safely
 
@@ -1493,8 +1505,9 @@ testable.
 
 Terraform creates:
 
-- one Python 3.12 Lambda, outside the VPC, `512` MiB memory, `30` second timeout, reserved
-  concurrency `5`;
+- one Python 3.12 Lambda, outside the VPC, `512` MiB memory and `30` second timeout; the current
+  account concurrency quota is `10`, and AWS requires all `10` to remain unreserved, so A3 uses
+  unreserved Lambda concurrency while the API stage enforces `5` requests/second and burst `10`;
 - one Lambda log group with 30-day retention;
 - one DynamoDB table;
 - one API Gateway HTTP API and explicit stage;
@@ -1519,9 +1532,9 @@ Terraform permissions.
 Local/hermetic:
 
 ```bash
-uv run --project services/aws_submission pytest -q
-uv run --project services/aws_submission mypy src
-uv run --project services/aws_submission ruff check .
+uv run --project services/aws_submission pytest services/aws_submission/tests -q
+uv run --project services/aws_submission mypy --config-file services/aws_submission/pyproject.toml services/aws_submission/src
+uv run --project services/aws_submission ruff check services/aws_submission
 terraform -chdir=infra/aws fmt -check
 terraform -chdir=infra/aws validate
 ```
@@ -1565,13 +1578,13 @@ Rollback:
 
 Acceptance:
 
-- [ ] One HTTP API uses native JWT validation; no Lambda authorizer exists.
-- [ ] One Lambda handles submit/status/cancel and requires the exact verified Google subject.
-- [ ] All invalid authentication cases fail before DynamoDB or Batch mutation.
-- [ ] Conditional idempotency and uncertain-submission reconciliation tests pass.
-- [ ] Caller-controlled infrastructure overrides are impossible.
-- [ ] Throttling, redacted access logs, Lambda logs, and basic alarms are configured.
-- [ ] Deployment remains `SUBMISSION_ENABLED=false` and has created no Batch/EC2 resource.
+- [x] One HTTP API uses native JWT validation; no Lambda authorizer exists.
+- [x] One Lambda handles submit/status/cancel and requires the exact verified Google subject.
+- [x] All invalid authentication cases fail before DynamoDB or Batch mutation.
+- [x] Conditional idempotency and uncertain-submission reconciliation tests pass.
+- [x] Caller-controlled infrastructure overrides are impossible.
+- [x] Throttling, redacted access logs, Lambda logs, and basic alarms are configured.
+- [x] Deployment remains `SUBMISSION_ENABLED=false` and has created no Batch/EC2 resource.
 
 Dependencies: A2. Estimated scope: four medium sessions (package, ledger, Terraform, cloud auth).
 

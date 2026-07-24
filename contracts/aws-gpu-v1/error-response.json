@@ -1,0 +1,8 @@
+{
+  "error": {
+    "code": "AWS_GPU_SUBMISSION_CONFLICT",
+    "message": "The application job already has different immutable submission parameters.",
+    "retryable": false,
+    "correlationId": "corr_01J3M8Q4T7Y0D2V6P9K1A5B8C3"
+  }
+}

@@ -1,0 +1,25 @@
+AWS GPU A3 submission-boundary verification
+Date: 2026-07-24
+
+Lambda package:
+uv run --project services/aws_submission pytest services/aws_submission/tests -q
+Result: 15 passed in 2.41s
+
+Lambda typing:
+uv run --project services/aws_submission mypy --config-file services/aws_submission/pyproject.toml services/aws_submission/src
+Result: success; no issues in 9 source files.
+
+Lambda lint:
+uv run --project services/aws_submission ruff check services/aws_submission
+Result: all checks passed.
+
+Root repository:
+- pytest: 185 passed, 3 opt-in integration/container tests skipped.
+- mypy: success; no issues in 26 source files.
+- ruff: all checks passed.
+
+Terraform safety guard tests cover:
+- A3 contains only non-GPU submission resources.
+- Submission remains disabled and Lambda has no Batch permission.
+- Native JWT issuer and audience are pinned.
+- Lambda IAM is limited to the ledger and logs.

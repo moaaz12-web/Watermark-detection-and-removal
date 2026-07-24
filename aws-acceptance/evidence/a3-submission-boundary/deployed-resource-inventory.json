@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-07-24",
+  "awsAccountId": "154959837939",
+  "region": "eu-north-1",
+  "environment": "staging",
+  "resources": {
+    "httpApiId": "g3qk2f8rsg",
+    "httpApiStage": "staging",
+    "lambdaFunction": "watermark-staging-submission",
+    "dynamoDbTable": "watermark-staging-submission-ledger",
+    "apiAccessLogGroup": "/aws/apigateway/watermark-staging-gpu-submission",
+    "lambdaLogGroup": "/aws/lambda/watermark-staging-submission",
+    "alarms": [
+      "watermark-staging-submission-errors",
+      "watermark-staging-submission-throttles"
+    ]
+  },
+  "configuration": {
+    "submissionEnabled": false,
+    "lambdaRuntime": "python3.12",
+    "lambdaMemoryMiB": 512,
+    "lambdaTimeoutSeconds": 30,
+    "apiRateLimitPerSecond": 5,
+    "apiBurstLimit": 10,
+    "dynamoDbBillingMode": "PAY_PER_REQUEST",
+    "dynamoDbPointInTimeRecovery": true,
+    "dynamoDbTtlDays": 90,
+    "logRetentionDays": 30
+  },
+  "computeInventory": {
+    "batchComputeEnvironments": [],
+    "runningBatchJobs": [],
+    "activeEc2Instances": [],
+    "activeNatGateways": [],
+    "activeEbsVolumes": []
+  }
+}

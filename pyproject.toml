@@ -32,6 +32,7 @@ packages = ["src/watermark_worker", "src/saicinpainting", "src/sam2"]
 [tool.pytest.ini_options]
 addopts = "-ra --strict-config --strict-markers"
 testpaths = ["tests"]
+pythonpath = ["src", "services/aws_submission/src"]
 markers = [
   "container: requires a local Docker-compatible container runtime",
   "gcs: requires explicitly enabled Google Cloud Storage test buckets",

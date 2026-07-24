@@ -1,0 +1,18 @@
+AWS GPU A3 Terraform evidence
+Date: 2026-07-24
+Region: eu-north-1
+Environment: staging
+
+Applied reviewed plan:
+- 7 resources added.
+- 1 resource changed in place.
+- 0 resources destroyed.
+- SUBMISSION_ENABLED remained false.
+- The plan contained no AWS Batch, EC2, EBS, NAT Gateway, or GPU resource.
+
+Post-apply verification:
+- terraform fmt -check -recursive: passed.
+- terraform validate: configuration valid.
+- terraform plan -refresh=false: no changes; configuration matches Terraform state.
+
+The real staging.tfvars and Terraform state are not stored in this evidence directory.

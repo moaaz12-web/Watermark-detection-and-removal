@@ -31,6 +31,16 @@ class ContractModel(BaseModel):
     )
 
 
+class OutputContractModel(ContractModel):
+    model_config = ConfigDict(
+        alias_generator=_to_camel,
+        extra="ignore",
+        populate_by_name=True,
+        serialize_by_alias=True,
+        use_enum_values=False,
+    )
+
+
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 Generation = Annotated[str, StringConstraints(pattern=r"^[1-9][0-9]*$")]
 Identifier = Annotated[
@@ -192,7 +202,7 @@ class InputManifest(ContractModel):
         return self.items[0].storage_mode
 
 
-class ObjectRef(ContractModel):
+class ObjectRef(OutputContractModel):
     uri: str
     generation: str
     checksum_sha256: Sha256
@@ -200,7 +210,7 @@ class ObjectRef(ContractModel):
     content_type: str
 
 
-class ItemResult(ContractModel):
+class ItemResult(OutputContractModel):
     schema_version: int = Field(ge=1, le=1)
     job_id: Identifier
     item_id: Identifier
@@ -220,6 +230,11 @@ class ItemResult(ContractModel):
     error_code: ErrorCode | None = None
     processing_seconds: float = Field(ge=0)
     completed_at: datetime
+    compute_provider: str | None = None
+    provider_region: str | None = None
+    provider_job_id: str | None = None
+    provider_attempt: int | None = Field(default=None, ge=1)
+    instance_type: str | None = None
 
     @model_validator(mode="after")
     def validate_terminal_shape(self) -> ItemResult:
@@ -247,13 +262,13 @@ class ItemResult(ContractModel):
         return self
 
 
-class InputIdentity(ContractModel):
+class InputIdentity(OutputContractModel):
     uri: str
     generation: str | None = None
     checksum_sha256: Sha256
 
 
-class ItemCompleteMarker(ContractModel):
+class ItemCompleteMarker(OutputContractModel):
     schema_version: int = Field(ge=1, le=1)
     job_id: Identifier
     item_id: Identifier
@@ -267,9 +282,14 @@ class ItemCompleteMarker(ContractModel):
     artifacts: dict[str, ObjectRef]
     image_digest_sha256: Sha256
     completed_at: datetime
+    compute_provider: str | None = None
+    provider_region: str | None = None
+    provider_job_id: str | None = None
+    provider_attempt: int | None = Field(default=None, ge=1)
+    instance_type: str | None = None
 
 
-class OutputManifestEntry(ContractModel):
+class OutputManifestEntry(OutputContractModel):
     item_id: Identifier
     status: ItemStatus
     decision: Decision
@@ -277,7 +297,7 @@ class OutputManifestEntry(ContractModel):
     marker: ObjectRef
 
 
-class OutputManifestCounts(ContractModel):
+class OutputManifestCounts(OutputContractModel):
     total: int = Field(ge=0)
     succeeded: int = Field(ge=0)
     failed: int = Field(ge=0)
@@ -291,7 +311,7 @@ class OutputManifestCounts(ContractModel):
         return self
 
 
-class OutputManifest(ContractModel):
+class OutputManifest(OutputContractModel):
     schema_version: int = Field(ge=1, le=1)
     job_id: Identifier
     tenant_id: Identifier
@@ -303,6 +323,11 @@ class OutputManifest(ContractModel):
     counts: OutputManifestCounts
     items: list[OutputManifestEntry]
     completed_at: datetime
+    compute_provider: str | None = None
+    provider_region: str | None = None
+    provider_job_id: str | None = None
+    provider_attempt: int | None = Field(default=None, ge=1)
+    instance_type: str | None = None
 
     @model_validator(mode="after")
     def validate_entries(self) -> OutputManifest:
@@ -314,7 +339,7 @@ class OutputManifest(ContractModel):
         return self
 
 
-class JobCompleteMarker(ContractModel):
+class JobCompleteMarker(OutputContractModel):
     schema_version: int = Field(ge=1, le=1)
     job_id: Identifier
     pipeline_version: str
@@ -324,6 +349,11 @@ class JobCompleteMarker(ContractModel):
     manifest: InputIdentity
     output_manifest: ObjectRef
     completed_at: datetime
+    compute_provider: str | None = None
+    provider_region: str | None = None
+    provider_job_id: str | None = None
+    provider_attempt: int | None = Field(default=None, ge=1)
+    instance_type: str | None = None
 
 
 def validate_worker_image_digest(value: str, *, require_container_digest: bool) -> str:

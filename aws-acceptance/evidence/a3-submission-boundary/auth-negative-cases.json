@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-07-24T17:06:47Z",
+  "region": "eu-north-1",
+  "environment": "staging",
+  "cases": [
+    {
+      "case": "missing_token",
+      "expectedHttpStatus": 401,
+      "observedHttpStatus": 401,
+      "passed": true
+    },
+    {
+      "case": "malformed_token",
+      "expectedHttpStatus": 401,
+      "observedHttpStatus": 401,
+      "passed": true
+    },
+    {
+      "case": "wrong_audience",
+      "expectedHttpStatus": 401,
+      "observedHttpStatus": 401,
+      "passed": true
+    },
+    {
+      "case": "wrong_verified_subject",
+      "expectedHttpStatus": 403,
+      "observedHttpStatus": 403,
+      "passed": true
+    },
+    {
+      "case": "unknown_route",
+      "expectedHttpStatus": 404,
+      "observedHttpStatus": 404,
+      "passed": true
+    },
+    {
+      "case": "approved_subject_while_submission_disabled",
+      "expectedHttpStatus": 503,
+      "expectedErrorCode": "AWS_GPU_SUBMISSION_DISABLED",
+      "observedHttpStatus": 503,
+      "passed": true
+    }
+  ],
+  "postconditions": {
+    "dynamoDbLedgerCount": 0,
+    "batchComputeEnvironmentCount": 0,
+    "runningBatchJobCount": 0,
+    "activeEc2InstanceCount": 0,
+    "activeNatGatewayCount": 0,
+    "activeEbsVolumeCount": 0,
+    "temporaryOidcTokenCreatorBindingsRemoved": true,
+    "tokensLoggedOrPersisted": false
+  }
+}
