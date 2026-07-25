@@ -1,0 +1,83 @@
+AWS GPU A5 completion evidence
+Date: 2026-07-25
+Region: eu-north-1
+AWS account: 154959837939
+
+Status:
+- A5.1 ECR creation and constraints: complete
+- A5.2 locked Linux AMD64 image build: complete
+- A5.3 CPU-only gates and image review: complete
+- A5.4 ECR publication and digest resolution: complete
+- A5: complete
+
+Published image:
+- repository:
+  154959837939.dkr.ecr.eu-north-1.amazonaws.com/watermark-staging-worker
+- immutable tag: a5-20260725-d983003e6b33
+- deployment reference:
+  154959837939.dkr.ecr.eu-north-1.amazonaws.com/watermark-staging-worker@sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+- OCI index digest:
+  sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+- image manifest digest:
+  sha256:128b339aca794a42e2dd3eeefa16f922b87b451c3994ac6dee017d3ee80f5cbc
+- BuildKit attestation manifest digest:
+  sha256:567f7b03620d25459473ecfefd74466d964658bb5d380d2f266f856909432728
+- media type: application/vnd.oci.image.index.v1+json
+- ECR-reported image size: 6513388131 bytes
+- pushed at: 2026-07-25T17:55:50.266000+05:00
+- local and ECR OCI index digests match exactly
+
+Repository controls:
+- image tags: IMMUTABLE
+- encryption: AES256
+- force delete: false
+- lifecycle selects only untagged images older than 30 days
+- public/cross-account repository policy: none
+- vulnerability scan-on-push: disabled by operator decision
+- embedded-secret image scan: deferred by operator decision
+
+Build identity:
+- build source HEAD recorded at the pre-build checkpoint:
+  cc617affcdd6c95c00a782f29e9d9a4c7592e48a
+- reviewed build-input aggregate:
+  d983003e6b33a02c0c98d14bc4dfb8db98c0d59088ced1b4b96db56ad894ca0c
+- reviewed base:
+  docker.io/pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime@sha256:831247999fbf7e08f61b3e39f6d77ee434f38f6f07f769d00db451e853878067
+- requirements-gpu.in SHA-256:
+  86e88dd05fea7f92e6b54dd2d365bce017f5afcb1b91a9408c7a2427e0a4152d
+- requirements-gpu.lock SHA-256:
+  a826b75495afe22f19c0160bf4ca4def2091e326628bd7457e0ef5ca4cda922d
+- Dockerfile.gpu SHA-256:
+  489efc1d83a52af975d111be105fc706b31f8e88b253384933fb751d5bce9491
+
+CPU-only acceptance:
+- locked GPU libraries imported successfully
+- torch: 2.5.1+cu121
+- torchvision: 0.20.1+cu121
+- CUDA ABI: 12.1
+- CUDA was not initialized
+- Linux AMD64 and configured user 10001:10001 verified
+- pip and wheel absent from the runtime
+- network-disabled, read-only validate-only run passed
+- completed replay passed
+- image configuration and complete build history reviewed
+- result: 2 passed
+
+Credential cleanup:
+- Docker's configured pass credential helper was uninitialized, so the ECR login used an isolated
+  temporary Docker config.
+- /tmp/watermark-a5-docker-config was removed after publication.
+- no persistent ECR token was added to the repository or global Docker configuration.
+
+Zero-compute verification after publication:
+- Batch compute environments: 0
+- EC2 instances: 0
+- EBS volumes: 0
+- NAT gateways: 0
+- running local containers: 0
+
+Rollback:
+- A6 and later job definitions must refer to the OCI index by digest.
+- If this digest is rejected later, deregister every job-definition revision that references it
+  before deleting the tag or digest.
+- Do not delete this digest while any active or retryable Batch job can reference it.

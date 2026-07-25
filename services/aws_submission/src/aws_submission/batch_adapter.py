@@ -48,11 +48,12 @@ class AwsBatchAdapter:
                 jobQueue=self._queue_arn,
                 jobDefinition=self._job_definition_arn,
                 parameters={
-                    "applicationJobId": request.application_job_id,
-                    "manifestUri": request.manifest_uri,
-                    "manifestGeneration": request.manifest_generation,
-                    "outputManifestUri": request.output_manifest_uri,
-                    "pipelineVersion": request.pipeline_version,
+                    "JOB_ID": request.application_job_id,
+                    "MANIFEST_URI": request.manifest_uri,
+                    "MANIFEST_GENERATION": request.manifest_generation,
+                    "OUTPUT_MANIFEST_URI": request.output_manifest_uri,
+                    "PIPELINE_VERSION": request.pipeline_version,
+                    "PROVIDER_ATTEMPT": "1",
                 },
                 tags={
                     "applicationJobId": request.application_job_id,

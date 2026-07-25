@@ -1,0 +1,75 @@
+AWS GPU A5 local-build checkpoint
+Date: 2026-07-25
+Region: eu-north-1
+
+Historical checkpoint:
+- This record captures the state immediately before successful ECR publication.
+- A5 was subsequently completed; see a5-completion.txt.
+
+Status:
+- A5.1 ECR repository creation is complete.
+- A5.2 local Linux AMD64 image build is complete.
+- A5.3 CPU-only container gates and image configuration/history review are complete.
+- ECR push and immutable digest resolution are pending.
+- A5 is not complete.
+
+Local image:
+- tag: watermark-worker:a5-20260725-d983003e6b33
+- image ID: sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+- local manifest digest:
+  sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+- platform: linux/amd64
+- configured user: 10001:10001
+- size: 6513391373 bytes
+- created: 2026-07-25T10:04:01.830934258Z
+- ECR image: not pushed
+
+Build input:
+- reviewed base:
+  docker.io/pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime@sha256:831247999fbf7e08f61b3e39f6d77ee434f38f6f07f769d00db451e853878067
+- build-input identity: d983003e6b33
+- Docker build completed all 20 steps successfully.
+- The two InvalidDefaultArgInFrom messages were static Dockerfile warnings; the required,
+  digest-pinned GPU_BASE_IMAGE build argument was supplied and resolved successfully.
+
+CPU-only gates:
+- locked GPU libraries imported successfully
+- torch: 2.5.1+cu121
+- torchvision: 0.20.1+cu121
+- CUDA ABI: 12.1
+- CUDA was not initialized
+- configured user: 10001:10001
+- packaging tools pip and wheel are absent
+- read-only, network-disabled validate-only run passed
+- completed replay passed
+- result: 2 passed
+- The initial replay attempt used pytest's default /tmp path, which Docker Desktop could not
+  bind-mount. Re-running with pytest temporary files under the shared project path passed without
+  changing the image or worker.
+
+Configuration/history review:
+- OS/architecture: linux/amd64
+- working directory: /app
+- entrypoint: python -m watermark_worker
+- configured environment contains only expected runtime/CUDA values
+- history contains the expected base, OS packages, locked virtual environment, source,
+  configuration, model manifest, non-root user, and entrypoint layers
+- no unexpected credential value or customer object was visible in configuration/history
+
+ECR push checkpoint:
+- The operator stopped the first upload and will run the push locally.
+- ECR image count after interruption: 0
+- ECR image IDs after interruption: none
+- No deployable ECR tag or manifest was created.
+- The temporary Docker registry credential configuration was removed.
+
+Image-scanning decision:
+- vulnerability scanning is deferred
+- embedded-secret scanning is deferred
+- neither is an A5 acceptance gate
+- see image-scan-deferral.txt
+
+Cost boundary:
+- the image exists only in local Docker at this checkpoint
+- no ECR image upload occurred
+- no AWS Batch, EC2, EBS, NAT gateway, or GPU resource was created by the build

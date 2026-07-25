@@ -4,7 +4,7 @@ import hashlib
 import json
 import mimetypes
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Protocol
@@ -16,6 +16,7 @@ from google.cloud import storage as google_storage
 from watermark_worker.contracts import ErrorCode, ObjectRef
 from watermark_worker.errors import (
     ConditionalWriteCollision,
+    InvalidConfigurationError,
     InvalidManifestError,
     PermanentStorageError,
     RetryableStorageError,
@@ -390,6 +391,32 @@ class GcsStorageAdapter:
             raise
         except Exception as exc:
             raise _translate_gcs_error(exc, operation=f"create {uri}") from exc
+
+
+def build_gcs_storage_adapter(
+    environment: Mapping[str, str] | None = None,
+    *,
+    credentials_factory: Callable[[Mapping[str, str]], Any] | None = None,
+    client_factory: Callable[..., Any] = google_storage.Client,
+) -> GcsStorageAdapter:
+    resolved_environment = os.environ if environment is None else environment
+    compute_provider = resolved_environment.get("COMPUTE_PROVIDER")
+
+    if compute_provider == "AWS_BATCH":
+        if credentials_factory is None:
+            from watermark_worker.aws_wif import build_aws_wif_credentials
+
+            credentials_factory = build_aws_wif_credentials
+        credentials = credentials_factory(resolved_environment)
+        project_id = resolved_environment.get("GCP_PROJECT_ID")
+        if not project_id:
+            raise InvalidConfigurationError("GCP_PROJECT_ID is required")
+        client = client_factory(project=project_id, credentials=credentials)
+        return GcsStorageAdapter(client=client)
+
+    if compute_provider not in {None, "", "GCP"}:
+        raise InvalidConfigurationError("COMPUTE_PROVIDER is not supported")
+    return GcsStorageAdapter(client=client_factory())
 
 
 def _translate_gcs_error(

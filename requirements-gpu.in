@@ -23,6 +23,8 @@ imgaug==0.4.0
 easydict==1.13
 
 # Worker and vendored-runtime direct requirements not listed above.
+boto3>=1.40,<2.0
+google-auth>=2.56,<3.0
 google-cloud-storage>=3.0,<4.0
 pillow>=10.0,<13.0
 pydantic>=2.11,<3.0

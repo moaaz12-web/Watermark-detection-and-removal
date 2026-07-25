@@ -12,7 +12,11 @@
 .env.*
 *.key
 *.pem
+aws-acceptance
+contracts
 Dockerfile.*
 docs
+infra
 images
+services
 tests

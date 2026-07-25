@@ -34,6 +34,61 @@ data "aws_iam_policy_document" "submission_lambda" {
     ]
     resources = ["${aws_cloudwatch_log_group.lambda.arn}:*"]
   }
+
+  dynamic "statement" {
+    for_each = local.batch_image_ready ? [1] : []
+
+    content {
+      sid     = "SubmitOnlyApprovedGpuJob"
+      actions = ["batch:SubmitJob"]
+      resources = [
+        aws_batch_job_queue.gpu.arn,
+        local.batch_job_definition_arn,
+        "arn:aws:batch:${var.aws_region}:${var.aws_account_id}:job/*",
+      ]
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [var.aws_region]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.batch_image_ready ? [1] : []
+
+    content {
+      sid = "ListAndDescribeRegionJobs"
+      actions = [
+        "batch:DescribeJobs",
+        "batch:ListJobs",
+      ]
+      resources = ["*"]
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [var.aws_region]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = local.batch_image_ready ? [1] : []
+
+    content {
+      sid       = "TerminateAccountJobs"
+      actions   = ["batch:TerminateJob"]
+      resources = ["arn:aws:batch:${var.aws_region}:${var.aws_account_id}:job/*"]
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestedRegion"
+        values   = [var.aws_region]
+      }
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "submission_lambda" {

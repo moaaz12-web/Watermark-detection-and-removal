@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-07-24",
+  "principal": "serviceAccount:watermark-gpu-worker@project-5909a738-2fdc-451e-ad6.iam.gserviceaccount.com",
+  "bindings": [
+    {
+      "bucket": "project-5909a738-2fdc-451e-ad6-watermark-data",
+      "role": "roles/storage.objectViewer",
+      "condition": "resource.name.startsWith('projects/_/buckets/project-5909a738-2fdc-451e-ad6-watermark-data/objects/gpu_acceptance/')"
+    },
+    {
+      "bucket": "project-5909a738-2fdc-451e-ad6-watermark-data",
+      "role": "roles/storage.objectCreator",
+      "condition": "resource.name.startsWith('projects/_/buckets/project-5909a738-2fdc-451e-ad6-watermark-data/objects/gpu_acceptance/')"
+    },
+    {
+      "bucket": "project-5909a738-2fdc-451e-ad6-watermark-models",
+      "role": "roles/storage.objectViewer",
+      "condition": "resource.name.startsWith('projects/_/buckets/project-5909a738-2fdc-451e-ad6-watermark-models/objects/watermark-v1/')"
+    }
+  ],
+  "unconditionalWorkerBucketBindings": [],
+  "projectLevelWorkerStorageRoles": [],
+  "removedWithOwnerApproval": [
+    "data bucket-wide roles/storage.objectViewer",
+    "data bucket-wide roles/storage.objectCreator",
+    "models bucket-wide roles/storage.objectViewer"
+  ],
+  "deletePermissionGranted": false,
+  "updatePermissionGranted": false,
+  "bucketAdministrationGranted": false
+}

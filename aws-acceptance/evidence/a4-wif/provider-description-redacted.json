@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-07-24",
+  "projectNumber": "834057675927",
+  "pool": "watermark-aws",
+  "provider": "staging",
+  "state": "ACTIVE",
+  "awsAccountId": "154959837939",
+  "attributeMapping": {
+    "google.subject": "assertion.arn",
+    "attribute.account": "assertion.account",
+    "attribute.aws_role": "assertion.arn.extract('assumed-role/{role_name}/')"
+  },
+  "attributeConditionSummary": {
+    "accountEquals": "154959837939",
+    "assumedRolePrefix": "watermark-staging-gpu-job-role",
+    "exactAccountAndRoleRequired": true
+  },
+  "serviceAccountKeyCreated": false
+}

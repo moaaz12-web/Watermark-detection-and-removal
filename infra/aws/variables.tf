@@ -45,6 +45,70 @@ variable "gcp_project_number" {
   }
 }
 
+variable "gcp_wif_pool_id" {
+  description = "Dedicated workload identity pool for AWS watermark workloads."
+  type        = string
+  default     = "watermark-aws"
+
+  validation {
+    condition     = var.gcp_wif_pool_id == "watermark-aws"
+    error_message = "The accepted staging WIF pool ID is watermark-aws."
+  }
+}
+
+variable "gcp_wif_provider_id" {
+  description = "AWS provider within the watermark workload identity pool."
+  type        = string
+  default     = "staging"
+
+  validation {
+    condition     = var.gcp_wif_provider_id == "staging"
+    error_message = "The accepted AWS WIF provider ID is staging."
+  }
+}
+
+variable "gcs_worker_read_prefixes" {
+  description = "Bucket/object prefixes the federated GPU worker may read."
+  type = set(object({
+    bucket = string
+    prefix = string
+  }))
+
+  validation {
+    condition = (
+      length(var.gcs_worker_read_prefixes) > 0 &&
+      alltrue([
+        for item in var.gcs_worker_read_prefixes :
+        can(regex("^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$", item.bucket)) &&
+        can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*/$", item.prefix)) &&
+        !strcontains(item.prefix, "..")
+      ])
+    )
+    error_message = "Worker read prefixes must use valid bucket names and safe object prefixes ending in /."
+  }
+}
+
+variable "gcs_worker_output_prefixes" {
+  description = "Bucket/object prefixes where the federated GPU worker may create outputs."
+  type = set(object({
+    bucket = string
+    prefix = string
+  }))
+
+  validation {
+    condition = (
+      length(var.gcs_worker_output_prefixes) > 0 &&
+      alltrue([
+        for item in var.gcs_worker_output_prefixes :
+        can(regex("^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$", item.bucket)) &&
+        can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*/$", item.prefix)) &&
+        !strcontains(item.prefix, "..")
+      ])
+    )
+    error_message = "Worker output prefixes must use valid bucket names and safe object prefixes ending in /."
+  }
+}
+
 variable "google_jwt_issuer" {
   description = "Issuer for Google-signed service-account ID tokens."
   type        = string
@@ -119,16 +183,24 @@ variable "submission_enabled" {
   default     = false
 }
 
-variable "batch_queue_arn" {
-  description = "Approved Batch queue ARN; intentionally empty during A3."
-  type        = string
-  default     = ""
+variable "batch_queue_enabled" {
+  description = "Whether the dedicated GPU job queue accepts submissions."
+  type        = bool
+  default     = false
 }
 
-variable "batch_job_definition_arn" {
-  description = "Approved Batch job-definition ARN; intentionally empty during A3."
+variable "worker_image_digest" {
+  description = "A5 ECR image digest (sha256:...) used to create the immutable Batch job definition; empty holds at the A5 gate."
   type        = string
   default     = ""
+
+  validation {
+    condition = (
+      var.worker_image_digest == "" ||
+      can(regex("^sha256:[0-9a-f]{64}$", var.worker_image_digest))
+    )
+    error_message = "worker_image_digest must be empty or an immutable sha256:<64 lowercase hex> digest."
+  }
 }
 
 variable "ledger_ttl_seconds" {

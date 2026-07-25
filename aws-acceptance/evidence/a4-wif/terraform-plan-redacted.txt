@@ -1,0 +1,25 @@
+AWS GPU A4 Terraform evidence
+Date: 2026-07-24
+Region: eu-north-1
+Environment: staging
+
+Applied reviewed saved plan:
+- 11 resources added.
+- 0 resources updated.
+- 0 resources replaced.
+- 0 resources destroyed.
+- SUBMISSION_ENABLED remained false.
+- No AWS Batch, EC2, EBS, NAT Gateway, or GPU resource was present.
+
+Created boundary:
+- One ECS task role with no identity policy.
+- Four required Google APIs managed with disable_on_destroy=false.
+- One Google workload identity pool and one exact-account AWS provider.
+- One exact-role workloadIdentityUser service-account member.
+- Three conditional GCS IAM members.
+
+Post-apply:
+- WIF pool/provider ACTIVE.
+- Terraform plan reports no changes.
+- Three pre-existing, unmanaged bucket-wide worker permissions were removed with owner approval.
+- Only the Terraform-managed conditional GCS permissions remain.

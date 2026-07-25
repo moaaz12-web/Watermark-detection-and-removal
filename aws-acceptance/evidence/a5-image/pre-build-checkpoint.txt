@@ -1,0 +1,62 @@
+AWS GPU A5 pre-build checkpoint
+Date: 2026-07-25
+Region: eu-north-1
+
+Historical checkpoint:
+- This record captures the state before the operator build.
+- The image was subsequently built; see local-build-checkpoint.txt.
+
+Status:
+- A5.1 ECR repository creation is complete.
+- A5.2 pre-build code and dependency preparation is complete.
+- Stopped before docker build by operator direction.
+- No container image was built, run, scanned, or pushed.
+- A5 is not complete.
+
+Repository:
+- URI: 154959837939.dkr.ecr.eu-north-1.amazonaws.com/watermark-staging-worker
+- image count: 0
+- immutable tags: enabled
+- vulnerability scan on push: disabled by operator decision on 2026-07-25
+- encryption: AES256
+- lifecycle: untagged images older than 30 days only
+
+Build-input identity:
+- source HEAD: cc617affcdd6c95c00a782f29e9d9a4c7592e48a
+- reviewed build-input aggregate SHA-256:
+  d983003e6b33a02c0c98d14bc4dfb8db98c0d59088ced1b4b96db56ad894ca0c
+- requirements-gpu.in SHA-256:
+  86e88dd05fea7f92e6b54dd2d365bce017f5afcb1b91a9408c7a2427e0a4152d
+- requirements-gpu.lock SHA-256:
+  a826b75495afe22f19c0160bf4ca4def2091e326628bd7457e0ef5ca4cda922d
+- Dockerfile.gpu SHA-256:
+  489efc1d83a52af975d111be105fc706b31f8e88b253384933fb751d5bce9491
+- reviewed base:
+  docker.io/pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime@sha256:831247999fbf7e08f61b3e39f6d77ee434f38f6f07f769d00db451e853878067
+
+Pre-build verification:
+- focused A5/A4/container-contract tests: 37 passed
+- repository pytest: 217 passed, 4 opt-in tests skipped
+- mypy: success across 27 source files
+- ruff: all checks passed
+- terraform fmt: clean
+- terraform validate: success
+- post-apply Terraform plan: no changes
+
+Deferred until after the operator build:
+- GPU-image import and CUDA ABI gate
+- non-root/read-only/replay container gate
+- ECR push and immutable digest resolution
+- final A5 build/digest evidence
+
+Image scanning:
+- vulnerability and embedded-secret scanning are intentionally deferred
+- neither is an A5 acceptance gate
+- see image-scan-deferral.txt for the decision and consequences
+
+Zero-cost compute proof after ECR apply:
+- Batch compute environments: 0
+- EC2 instances: 0
+- EBS volumes: 0
+- NAT gateways: 0
+- running local containers: 0

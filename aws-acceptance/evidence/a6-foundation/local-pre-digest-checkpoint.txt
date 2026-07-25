@@ -1,0 +1,32 @@
+A6 local pre-digest checkpoint
+Date: 2026-07-25
+Region: eu-north-1
+
+Completed locally:
+- Dedicated VPC/public-subnet/IGW/HTTPS+DNS egress Terraform.
+- No-ingress Batch security group.
+- Batch service-linked role, ECS instance profile, and ECS task execution role Terraform.
+- IMDSv2-only launch template with encrypted 200 GiB gp3 root storage and no key/user data.
+- Managed On-Demand compute environment restricted to BEST_FIT, g4dn.xlarge, min=0,
+  desired=0, max=4, and ECS_AL2023_NVIDIA.
+- Dedicated queue defaulting to DISABLED.
+- Job definition gated on an immutable A5 sha256 image digest.
+- Submission Lambda wiring gated on the image digest and fixed queue/job-definition resources.
+- Fixed per-job Batch parameter allowlist in the Lambda adapter.
+
+Local verification:
+- terraform fmt -check: PASS
+- terraform validate: PASS
+- pytest: 223 passed, 3 opt-in tests skipped
+
+Cloud status:
+- No A6 terraform plan was generated.
+- No A6 terraform apply was run.
+- No AWS Batch job was submitted.
+- No GPU or EC2 instance was launched by A6.
+
+Hold:
+- A5 ECR upload/digest evidence is pending.
+- worker_image_digest must remain empty until ECR reports the immutable digest.
+- batch_queue_enabled=false
+- submission_enabled=false

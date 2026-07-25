@@ -9,6 +9,8 @@ description = "Fail-closed, retry-safe GPU watermark worker foundation"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+  "boto3>=1.40,<2.0",
+  "google-auth>=2.56,<3.0",
   "google-cloud-storage>=3.0,<4.0",
   "pillow>=10.0,<13.0",
   "pydantic>=2.11,<3.0",
@@ -58,5 +60,16 @@ strict = true
 packages = ["watermark_worker"]
 
 [[tool.mypy.overrides]]
-module = ["yaml", "google.api_core", "google.cloud", "google.cloud.*"]
+module = [
+  "boto3",
+  "boto3.*",
+  "botocore",
+  "botocore.*",
+  "yaml",
+  "google.api_core",
+  "google.auth",
+  "google.auth.*",
+  "google.cloud",
+  "google.cloud.*",
+]
 ignore_missing_imports = true

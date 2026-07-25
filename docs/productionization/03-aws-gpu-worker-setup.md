@@ -1,9 +1,10 @@
 # AWS GPU Watermark Worker: Hybrid Production Setup Plan
 
-Status: Active implementation plan; A0, A1, and A3 complete. A2 is complete in this repository,
-with the external FastAPI repository mirror still pending.
+Status: Active implementation plan; A0, A1, A3, A4, and A5 complete. A2 is complete in this
+repository, with the external FastAPI repository mirror still pending. The tested A5 Linux AMD64
+worker image is published to private ECR under an immutable tag and digest.
 
-Last updated: 2026-07-24
+Last updated: 2026-07-25
 
 Implementation order: After the provider-neutral worker contract in
 [01-gpu-worker-setup.md](01-gpu-worker-setup.md), before the provider-specific portions of
@@ -99,11 +100,15 @@ Current AWS status:
 - The initial Batch network uses dedicated public subnets, ephemeral public IPv4 addresses, an
   internet gateway, and no inbound security-group rules. This avoids a permanently billed NAT
   gateway while retaining the outbound HTTPS path required for GCS and Google STS.
-- The dedicated GCP orchestration identity and exact numeric Google subject exist. The WIF provider
-  and AWS Batch job role remain A4 work.
+- The dedicated GCP orchestration identity and exact numeric Google subject exist. The A4
+  `watermark-aws` WIF pool, exact-role `staging` provider, and empty-permission AWS Batch job role
+  are deployed.
 - The A3 API Gateway HTTP API, native Google JWT authorizer, submission Lambda, DynamoDB ledger,
   redacted logs, throttling, and alarms are deployed in disabled-submit mode. The ledger is empty,
   and no Batch, EC2, EBS, or NAT Gateway resource exists.
+- The existing `watermark-gpu-worker` service account has no user-managed key. It may be
+  impersonated only by the exact staging GPU job role and has conditional GCS read/create access
+  only under `gpu_acceptance/` plus model read access under `watermark-v1/`.
 - Staging DynamoDB idempotency retention is 90 days and CloudWatch log retention is 30 days.
 
 ## 3. Scope
@@ -1593,6 +1598,10 @@ Dependencies: A2. Estimated scope: four medium sessions (package, ledger, Terraf
 Purpose: allow only the AWS Batch **job role** to impersonate the existing GCP
 `watermark-gpu-worker` service account and access approved GCS data without a key file.
 
+Status: Complete for infrastructure, worker code, hermetic tests, and static cloud verification.
+The real token exchange and positive/negative GCS operations remain intentionally deferred to the
+first A7 Batch run. Evidence: [A4 WIF](../../aws-acceptance/evidence/a4-wif/).
+
 #### A4.1 Create the AWS job role first
 
 Terraform creates `watermark-staging-gpu-job-role` with:
@@ -1665,6 +1674,10 @@ Using the impersonated `watermark-gpu-worker` service account:
 
 Record every binding and condition in Terraform or a versioned GCP IAM file. Avoid manual console
 bindings that Terraform cannot observe.
+
+During A4 verification, three older unconditional bucket-wide bindings for
+`watermark-gpu-worker` were discovered. With owner approval they were removed. Only the
+Terraform-managed conditional bindings above remain.
 
 #### A4.4 Add the worker credential adapter
 
@@ -1745,12 +1758,12 @@ Rollback:
 
 Acceptance:
 
-- [ ] Provider condition restricts the exact account and Batch job role.
-- [ ] Only that principalSet can impersonate `watermark-gpu-worker`.
-- [ ] GCS permissions are limited to approved buckets/prefixes.
-- [ ] Worker credential-adapter unit tests pass without exposing credentials.
-- [ ] No Google service-account key or long-lived AWS credential exists.
-- [ ] Live positive/negative GCS proof is explicitly deferred to the first A7 Batch run.
+- [x] Provider condition restricts the exact account and Batch job role.
+- [x] Only that principalSet can impersonate `watermark-gpu-worker`.
+- [x] GCS permissions are limited to approved buckets/prefixes.
+- [x] Worker credential-adapter unit tests pass without exposing credentials.
+- [x] No Google service-account key or long-lived AWS credential exists.
+- [x] Live positive/negative GCS proof is explicitly deferred to the first A7 Batch run.
 
 Dependencies: A1 and the A3 Terraform foundation. Estimated scope: three medium sessions.
 
@@ -1759,11 +1772,27 @@ Dependencies: A1 and the A3 Terraform foundation. Estimated scope: three medium 
 Purpose: build the reviewed worker plus the A4 WIF adapter once, test it without a GPU, and publish
 an immutable ECR digest.
 
+Status: Complete. The Linux AMD64 image `watermark-worker:a5-20260725-d983003e6b33` was built
+successfully, passed its CPU-only container gates and configuration/history review, and was
+published under an immutable Stockholm ECR tag. A6 must use this exact digest reference:
+
+```text
+154959837939.dkr.ecr.eu-north-1.amazonaws.com/watermark-staging-worker@sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+```
+
+Evidence: [A5 completion](../../aws-acceptance/evidence/a5-image/a5-completion.txt) and
+[A5 local-build checkpoint](../../aws-acceptance/evidence/a5-image/local-build-checkpoint.txt).
+
+Operator decisions (2026-07-25): vulnerability scanning and the embedded-secret image check are
+deferred and are not A5 acceptance gates. ECR scan-on-push is disabled. Build-context exclusions
+and the prohibition against including credentials, tokens, keys, customer objects, or environment
+files in the image remain required, but A5 does not run an automated image scanner.
+
 #### A5.1 Create and constrain ECR
 
 Terraform creates one private `watermark-staging-worker` repository with:
 
-- scan-on-push enabled;
+- vulnerability scan-on-push disabled for this initial milestone;
 - immutable tags;
 - AWS-managed encryption;
 - no cross-account or public repository policy; and
@@ -1779,7 +1808,12 @@ uv lock --check
 uv run pytest -q
 uv run mypy
 uv run ruff check .
-docker build --platform linux/amd64 --file Dockerfile.gpu --tag watermark-worker:BUILD_ID .
+docker build \
+  --platform linux/amd64 \
+  --build-arg GPU_BASE_IMAGE=REVIEWED_GPU_BASE_IMAGE_BY_DIGEST \
+  --file Dockerfile.gpu \
+  --tag watermark-worker:BUILD_ID \
+  .
 ```
 
 The Dockerfile must:
@@ -1798,7 +1832,13 @@ The Dockerfile must:
 Run:
 
 ```bash
-uv run pytest tests/container -m container -q
+RUN_CONTAINER_TESTS=1 \
+WM_CONTAINER_SKIP_BUILD=1 \
+WM_CONTAINER_RUNTIME_KIND=gpu \
+WM_CONTAINER_TEST_IMAGE=watermark-worker:BUILD_ID \
+WM_DOCKER_CONTEXT=desktop-linux \
+uv run pytest tests/container/test_container_smoke.py -m container -q \
+  --basetemp="$PWD/.a5-container-test-tmp"
 docker inspect watermark-worker:BUILD_ID
 docker history --no-trunc watermark-worker:BUILD_ID
 ```
@@ -1809,9 +1849,7 @@ Verify:
 - the worker runs as non-root;
 - a read-only filesystem run works with only approved temporary mounts;
 - local completed replay makes zero model-stage calls;
-- WIF adapter is not selected for local/GCP provider modes;
-- no known critical/high vulnerability is accepted without a documented reachability review; and
-- a secret scan finds no key/token/credential material.
+- WIF adapter is not selected for local/GCP provider modes.
 
 #### A5.4 Push and record the digest
 
@@ -1836,7 +1874,7 @@ OWNER_SUPPLIED_ECR_REPOSITORY@sha256:...
 ```
 
 in the job definition. Record the local image ID, ECR digest, source commit, lock hashes, base-image
-digest, build timestamp, scan result, and test summary.
+digest, build timestamp, image configuration/history review, and test summary.
 
 Evidence:
 
@@ -1851,10 +1889,9 @@ Rollback:
 
 Acceptance:
 
-- [ ] Linux AMD64 image is in private ECR under an immutable tag and digest.
-- [ ] CPU import, ABI, non-root, read-only, replay, WIF-selection, and secret-scan gates pass.
-- [ ] ECR scan has no unreviewed blocking finding.
-- [ ] Digest/build evidence is recorded.
+- [x] Linux AMD64 image is in private ECR under an immutable tag and digest.
+- [x] CPU import, ABI, non-root, read-only, replay, and WIF-selection gates pass.
+- [x] Digest/build evidence is recorded.
 
 Dependencies: A4 code/configuration design. Estimated scope: two medium sessions.
 
@@ -1862,6 +1899,12 @@ Dependencies: A4 code/configuration design. Estimated scope: two medium sessions
 
 Purpose: create a disabled/idle AWS Batch foundation whose hard limits make more than one
 `g4dn.xlarge` impossible. Creating A6 must not launch a GPU.
+
+Implementation status (2026-07-25): the Terraform, Lambda adapter update, static safety tests, and
+local validation are complete. The configuration has **not** been planned or applied for A6.
+`worker_image_digest=""`, `batch_queue_enabled=false`, and `submission_enabled=false` are the
+current safe hold while the A5 ECR upload finishes. No A6 AWS resource or GPU was created by this
+implementation session.
 
 #### A6.1 Create the low-baseline network
 
@@ -1877,17 +1920,25 @@ Terraform creates:
 Do not create NAT Gateway, Elastic IP, load balancer, VPN, Direct Connect, bastion, SSH key, or
 database. Confirm the Terraform plan contains none of those resources.
 
-#### A6.2 Create the three distinct AWS runtime roles
+Implementation: `infra/aws/batch-network.tf`.
+
+#### A6.2 Create the distinct AWS runtime identities
 
 1. AWS Batch service-linked role: control-plane role managed for Batch.
 2. ECS compute-instance profile: ECS registration, ECR pull, and host/log operations only.
-3. Batch job role from A4: task-level WIF identity only.
-4. Lambda role from A3: table plus fixed Batch submit/describe/terminate/pass-role permissions.
+3. ECS task execution role: ECR image pull and `awslogs` delivery only.
+4. Batch job role from A4: task-level WIF identity only.
+5. Lambda role from A3: table plus fixed Batch submit/list/describe/terminate permissions.
 
-The Lambda `iam:PassRole` resource is only the dedicated job role. Batch actions are restricted as
-far as the AWS API supports by queue, job definition, region/account, and explicit conditions. A
-unit/static policy test rejects wildcard actions/resources unless AWS requires one and the exception
-is documented.
+Lambda does not receive `iam:PassRole`. It cannot supply or override a role in `SubmitJob`; the
+reviewed job definition already contains the task and execution roles. The Terraform deployment
+identity needs the relevant pass-role authority when registering that definition, not the runtime
+Lambda. `SubmitJob` is restricted to the exact queue, exact job-definition revision, account job ARN
+space, and Stockholm. `ListJobs` and `DescribeJobs` must use `Resource="*"` because AWS Batch does not support resource-level
+authorization for those actions. `TerminateJob` is restricted to Stockholm account job ARNs. The
+`aws:RequestedRegion=eu-north-1` condition remains on every Batch statement.
+
+Implementation: `infra/aws/batch-iam.tf` and the conditional statements in `infra/aws/iam.tf`.
 
 #### A6.3 Create the launch template and compute environment
 
@@ -1904,7 +1955,7 @@ Managed EC2 compute environment:
 ```text
 state: ENABLED
 type: EC2 On-Demand
-allocation strategy: BEST_FIT_PROGRESSIVE
+allocation strategy: BEST_FIT
 instance types: g4dn.xlarge only
 min vCPUs: 0
 desired vCPUs: 0
@@ -1915,8 +1966,17 @@ instance profile: dedicated ECS compute profile
 GPU-optimized ECS image type supported by current AWS Batch
 ```
 
+`BEST_FIT` is deliberate. For On-Demand compute environments, AWS documents that allocation
+strategies other than `BEST_FIT` can exceed `maxvCpus` by one instance. With only one allowed
+instance type there is no useful progressive choice, and `BEST_FIT` preserves the strict
+one-`g4dn.xlarge` ceiling.
+
 Let AWS Batch select the current supported GPU-optimized AMI; record the effective AMI/driver during
 A7. Do not pin an unverified AMI ID.
+
+Implementation: `infra/aws/batch-compute.tf`. The launch template has no AMI, key pair, or user
+data; requires IMDSv2; uses a 200 GiB encrypted `gp3` root volume; and propagates reviewed tags.
+The compute environment uses `ECS_AL2023_NVIDIA`, `min=0`, `desired=0`, and `max=4`.
 
 #### A6.4 Create queue and immutable job definition
 
@@ -1960,6 +2020,17 @@ PROVIDER_ATTEMPT
 Lambda constructs those values from the validated request. It cannot override image, command,
 roles, queue, resources, retry, timeout, or networking.
 
+Implementation: `infra/aws/batch-job.tf` and
+`services/aws_submission/src/aws_submission/batch_adapter.py`.
+
+The queue is controlled by `batch_queue_enabled` and defaults to `DISABLED`. The job definition is
+created only when `worker_image_digest` is a valid lowercase `sha256:...` value. Its image is
+`watermark-staging-worker@sha256:...`; it passes the digest itself to the worker's audit field. The
+fixed command accepts only the generation-pinned GCS manifest and packaged config/model-manifest
+paths. A Docker-managed scratch volume is mounted at `/tmp/watermark-worker`, allowing the
+non-root worker to use its approved work directory while the container root filesystem remains
+read-only.
+
 #### A6.5 Wire and inspect without submitting
 
 After queue/job-definition creation:
@@ -1970,6 +2041,20 @@ After queue/job-definition creation:
 4. enable the job queue only after static inspection;
 5. run `terraform plan` again and require no unexpected changes; and
 6. query the deployed resources with `describe-*`.
+
+Digest gate procedure after the A5 upload:
+
+1. use `aws ecr describe-images` to read the immutable digest for the uploaded tag;
+2. put only that `sha256:...` value in the ignored staging tfvars as `worker_image_digest`;
+3. keep `batch_queue_enabled=false` and `submission_enabled=false`;
+4. rebuild the Lambda ZIP because its adapter parameter names changed;
+5. run `terraform fmt -check`, `terraform validate`, tests, and a reviewed plan;
+6. apply only after the plan has no forbidden or surprising resources; and
+7. collect the deployed-resource and zero-capacity evidence below.
+
+The Lambda environment receives the Terraform-created queue ARN and, after the digest gate, the
+exact job-definition revision ARN. Its lifecycle precondition prevents submission from being
+enabled unless the image exists and the queue is enabled.
 
 Static checks:
 
@@ -2010,10 +2095,12 @@ Rollback:
 
 Acceptance:
 
-- [ ] Only `g4dn.xlarge` and maximum 4 vCPUs are permitted.
+- [x] Local Terraform permits only `g4dn.xlarge` and maximum 4 vCPUs.
+- [x] Queue, job definition, Lambda wiring, and submission adapter pass static tests.
+- [x] Terraform formatting and local provider-schema validation pass.
 - [ ] Queue and digest-pinned job-definition revision are valid.
 - [ ] Resources, roles, timeout, attempts, logs, storage, and network match the runbook.
-- [ ] Lambda cannot accept infrastructure overrides and remains submission-disabled.
+- [x] Lambda cannot accept infrastructure overrides and remains submission-disabled in code.
 - [ ] No GPU instance, EBS worker volume, NAT gateway, or other unexpected resource is running.
 
 Dependencies: A4 and A5. Estimated scope: three medium sessions.

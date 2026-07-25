@@ -7,6 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CANDIDATES_PATH = PROJECT_ROOT / "gpu-runtime-candidates.toml"
 GPU_REQUIREMENTS_PATH = PROJECT_ROOT / "requirements-gpu.in"
+GPU_LOCK_PATH = PROJECT_ROOT / "requirements-gpu.lock"
 
 
 def test_gpu_runtime_candidates_are_exact_and_immutable() -> None:
@@ -59,6 +60,8 @@ def test_gpu_requirements_input_covers_the_selected_runtime_only() -> None:
         assert f"{package}=={version}" in requirements
 
     for required_runtime in (
+        "boto3",
+        "google-auth",
         "google-cloud-storage",
         "pillow",
         "pydantic",
@@ -72,3 +75,30 @@ def test_gpu_requirements_input_covers_the_selected_runtime_only() -> None:
     assert "owlv2" not in requirements
     assert "requirements-gpu.lock" in requirements
     assert "--generate-hashes" in requirements
+
+    lock = GPU_LOCK_PATH.read_text(encoding="utf-8")
+    assert "boto3==" in lock
+    assert "botocore==" in lock
+    assert "google-auth==" in lock
+
+
+def test_gpu_build_context_excludes_cloud_configuration_and_evidence() -> None:
+    ignored = {
+        line.strip()
+        for line in (PROJECT_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert {
+        ".git",
+        ".env",
+        ".env.*",
+        "*.key",
+        "*.pem",
+        "infra",
+        "aws-acceptance",
+        "contracts",
+        "services",
+        "tests",
+        "docs",
+    } <= ignored

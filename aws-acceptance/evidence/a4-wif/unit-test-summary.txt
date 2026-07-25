@@ -1,0 +1,31 @@
+AWS GPU A4 Workload Identity Federation verification
+Date: 2026-07-24
+
+Focused A3/A4 policy and credential tests:
+uv run pytest tests/unit/test_aws_wif_credentials.py tests/unit/test_aws_wif_terraform.py tests/unit/test_aws_submission_terraform.py -q
+Result: 32 passed in 1.87s
+
+Repository-wide verification after the A4 implementation:
+- pytest: 213 passed, 3 opt-in integration/container tests skipped.
+- mypy: success; no issues in 27 source files.
+- ruff: all checks passed.
+- Terraform formatting: passed.
+- Terraform validation: configuration valid.
+
+Credential-adapter cases prove:
+- AWS Batch mode requires the ECS relative task-credential URI.
+- Static AWS environment credentials, profiles, shared files, and full credential URLs are rejected.
+- The accepted region, WIF provider, project, and service-account endpoint are validated.
+- Credentials are resolved on refresh and not cached as permanent values.
+- Missing or non-temporary AWS credentials fail with sanitized errors.
+- AWS Batch GCS clients receive explicit federated credentials.
+- GCP and unspecified compute modes preserve Application Default Credentials.
+
+Cloud verification:
+- WIF pool/provider state is ACTIVE.
+- AWS GPU job role has zero managed and zero inline policies.
+- The worker service account has zero user-managed keys.
+- Only exact role-scoped workloadIdentityUser impersonation is granted.
+- All worker GCS permissions are conditionally prefix-scoped.
+- Terraform reports no changes after apply and IAM cleanup.
+- Live positive/negative token exchange is deferred to the first A7 Batch job, as specified.

@@ -42,10 +42,10 @@ from watermark_worker.progress import emit_event
 from watermark_worker.result_writer import ArtifactPayload, ResultWriter, RunIdentity
 from watermark_worker.runtime_assembly import build_default_production_executor
 from watermark_worker.storage import (
-    GcsStorageAdapter,
     LocalStorageAdapter,
     StorageAdapter,
     StoredObject,
+    build_gcs_storage_adapter,
     sha256_bytes,
     verify_sha256,
 )
@@ -445,7 +445,7 @@ def _load_manifest(
         )
     if arguments.manifest_uri is None or arguments.manifest_generation is None:
         raise InvalidCliError("GCS manifest URI and generation are required")
-    storage = storage_override or GcsStorageAdapter()
+    storage = storage_override or build_gcs_storage_adapter()
     stored = storage.read_bytes(arguments.manifest_uri, generation=arguments.manifest_generation)
     if stored.ref.generation != arguments.manifest_generation:
         raise InvalidManifestError("GCS manifest generation did not match the pinned generation")

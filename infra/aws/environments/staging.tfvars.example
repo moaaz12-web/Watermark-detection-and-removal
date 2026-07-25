@@ -16,3 +16,25 @@ approved_output_prefixes = [
 
 pipeline_allowlist = ["watermark-v1"]
 submission_enabled = false
+batch_queue_enabled = false
+
+# Leave empty until the A5 push finishes and ECR reports the immutable digest.
+worker_image_digest = ""
+
+gcs_worker_read_prefixes = [
+  {
+    bucket = "OWNER_SUPPLIED_DATA_BUCKET"
+    prefix = "OWNER_SUPPLIED_INPUT_PREFIX/"
+  },
+  {
+    bucket = "OWNER_SUPPLIED_MODEL_BUCKET"
+    prefix = "watermark-v1/"
+  },
+]
+
+gcs_worker_output_prefixes = [
+  {
+    bucket = "OWNER_SUPPLIED_DATA_BUCKET"
+    prefix = "OWNER_SUPPLIED_OUTPUT_PREFIX/"
+  },
+]

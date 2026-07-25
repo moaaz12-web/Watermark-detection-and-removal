@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -208,6 +209,95 @@ class LoadedPipelineConfig:
     config: PipelineConfig
     sha256: str
     path: Path
+
+
+@dataclass(frozen=True)
+class AwsWifRuntimeConfig:
+    region: str
+    project_id: str
+    audience: str
+    service_account_impersonation_url: str
+
+    @classmethod
+    def from_environment(cls, environment: Mapping[str, str]) -> AwsWifRuntimeConfig:
+        if environment.get("COMPUTE_PROVIDER") != "AWS_BATCH":
+            raise InvalidConfigurationError(
+                "AWS WIF credentials require COMPUTE_PROVIDER=AWS_BATCH"
+            )
+
+        region = _required_environment_value(environment, "AWS_REGION")
+        if region != "eu-north-1":
+            raise InvalidConfigurationError("AWS_REGION must match the accepted AWS region")
+
+        relative_uri = _required_environment_value(
+            environment,
+            "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        )
+        if not re.fullmatch(r"/v2/credentials/[A-Za-z0-9-]+", relative_uri):
+            raise InvalidConfigurationError(
+                "AWS Batch task credentials must use the ECS relative credential URI"
+            )
+
+        forbidden_sources = (
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_PROFILE",
+            "AWS_SHARED_CREDENTIALS_FILE",
+            "AWS_CONFIG_FILE",
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        )
+        if any(environment.get(name) for name in forbidden_sources):
+            raise InvalidConfigurationError(
+                "static, profile, or caller-controlled AWS credential sources are forbidden"
+            )
+
+        project_id = _required_environment_value(environment, "GCP_PROJECT_ID")
+        if not re.fullmatch(r"[a-z][a-z0-9-]+", project_id):
+            raise InvalidConfigurationError("GCP_PROJECT_ID is malformed")
+
+        audience = _required_environment_value(environment, "GCP_WIF_AUDIENCE")
+        if not re.fullmatch(
+            r"//iam\.googleapis\.com/projects/[1-9][0-9]*/locations/global/"
+            r"workloadIdentityPools/watermark-aws/providers/staging",
+            audience,
+        ):
+            raise InvalidConfigurationError(
+                "GCP_WIF_AUDIENCE must name the approved staging AWS provider"
+            )
+
+        service_account_email = (
+            f"watermark-gpu-worker@{project_id}.iam.gserviceaccount.com"
+        )
+        expected_impersonation_url = (
+            "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
+            f"{service_account_email}:generateAccessToken"
+        )
+        impersonation_url = _required_environment_value(
+            environment,
+            "GCP_SERVICE_ACCOUNT_IMPERSONATION_URL",
+        )
+        if impersonation_url != expected_impersonation_url:
+            raise InvalidConfigurationError(
+                "GCP service-account impersonation URL is not the approved worker identity"
+            )
+
+        return cls(
+            region=region,
+            project_id=project_id,
+            audience=audience,
+            service_account_impersonation_url=impersonation_url,
+        )
+
+
+def _required_environment_value(
+    environment: Mapping[str, str],
+    name: str,
+) -> str:
+    value = environment.get(name)
+    if value is None or not value.strip():
+        raise InvalidConfigurationError(f"{name} is required")
+    return value
 
 
 _INVALID_SENTINELS = {"tbd", "todo", "main", "master", "latest", "null", "none"}

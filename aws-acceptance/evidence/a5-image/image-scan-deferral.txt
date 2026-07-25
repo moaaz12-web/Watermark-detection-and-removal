@@ -1,0 +1,37 @@
+AWS GPU A5 image-scan decision
+Date: 2026-07-25
+Region: eu-north-1
+
+Decision:
+- Vulnerability scanning is deferred for the initial worker-image milestone.
+- The embedded-secret image check is also deferred for the initial milestone.
+- ECR scan-on-push is disabled.
+- Vulnerability findings and secret-scan results are not A5 acceptance gates.
+- A5 does not run an automated image scanner before publishing.
+
+Consequence:
+- A5 will not identify or block known operating-system or package vulnerabilities.
+- A5 will not automatically identify credentials, tokens, or keys embedded in image layers.
+- Immutable tags, digest-pinned deployment, locked dependencies, non-root execution,
+  read-only runtime checks, restricted Docker build context, and the prohibition against
+  intentionally including credentials or customer data remain in scope.
+
+Infrastructure change:
+- aws_ecr_repository.worker image_scanning_configuration.scan_on_push: true -> false
+- in-place repository update only
+- no image, Batch, EC2, EBS, VPC, NAT gateway, or GPU resource is created
+
+Reviewed Terraform result:
+- plan: 0 to add, 1 to change, 0 to destroy
+- apply: 0 added, 1 changed, 0 destroyed
+- post-apply plan with refresh disabled: no changes
+
+Live verification:
+- ECR scanOnPush: false
+- ECR tag mutability: IMMUTABLE
+- ECR encryption: AES256
+- Batch compute environments: 0
+- EC2 instances: 0
+- EBS volumes: 0
+- NAT gateways: 0
+- running local containers: 0

@@ -1,0 +1,38 @@
+AWS GPU A5 pre-build Terraform plan
+Date: 2026-07-25
+Region: eu-north-1
+
+Saved plan result:
+- 2 to add
+- 0 to change
+- 0 to destroy
+
+Created by the reviewed saved plan:
+- aws_ecr_repository.worker
+- aws_ecr_lifecycle_policy.worker
+
+Repository controls:
+- name: watermark-staging-worker
+- private repository; no repository/public/cross-account policy
+- image tags: IMMUTABLE
+- scan on push: true
+- encryption: AES256
+- force delete: false
+- lifecycle: expire only untagged images older than 30 days
+
+Forbidden-resource review:
+- no AWS Batch resource
+- no EC2 instance or launch template
+- no EBS worker volume
+- no VPC, NAT gateway, Elastic IP, or load balancer
+- no destroy or replacement
+
+Post-apply Terraform plan with refresh disabled: no changes.
+
+Follow-up operator decision on 2026-07-25:
+- the create-plan record above is retained as historical evidence
+- vulnerability scan-on-push was subsequently disabled through a reviewed in-place update
+- follow-up plan: 0 to add, 1 to change, 0 to destroy
+- follow-up apply: 0 added, 1 changed, 0 destroyed
+- follow-up post-apply plan with refresh disabled: no changes
+- see image-scan-deferral.txt
