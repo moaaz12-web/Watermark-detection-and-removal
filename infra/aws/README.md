@@ -67,3 +67,13 @@ After ECR reports the pushed image's immutable `sha256:...` digest, set only
 `worker_image_digest` and run a reviewed plan. Keep the queue and submission disabled through the
 A6 apply and zero-capacity inspection. Enabling either belongs to a later, explicitly authorized
 checkpoint; submitting the first billable GPU job belongs to A7.
+
+## Current staging checkpoint
+
+As of 2026-07-25, A6 is deployed in `eu-north-1`. The compute environment and queue are `VALID`,
+the queue is `DISABLED`, submission is `false`, and job definition
+`watermark-staging-worker:1` references the accepted A5 image digest
+`sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218`.
+The post-apply Terraform plan reports no changes. Live checks found zero jobs, EC2 instances, EBS
+volumes, ECS container instances/tasks, Spot requests, NAT gateways, Elastic IPs, and load
+balancers. Redacted evidence is in `aws-acceptance/evidence/a6-foundation/`.

@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-07-25",
+  "region": "eu-north-1",
+  "name": "watermark-staging-worker",
+  "arn": "arn:aws:batch:eu-north-1:154959837939:job-definition/watermark-staging-worker:1",
+  "revision": 1,
+  "status": "ACTIVE",
+  "platform": "EC2",
+  "image": "154959837939.dkr.ecr.eu-north-1.amazonaws.com/watermark-staging-worker@sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218",
+  "resourceRequirements": {
+    "VCPU": "4",
+    "MEMORY_MiB": "14336",
+    "GPU": "1"
+  },
+  "attempts": 1,
+  "timeoutSeconds": 5400,
+  "user": "10001:10001",
+  "privileged": false,
+  "readonlyRootFilesystem": true,
+  "logConfiguration": {
+    "driver": "awslogs",
+    "group": "/aws/batch/watermark-staging-worker",
+    "region": "eu-north-1",
+    "streamPrefix": "worker",
+    "retentionDays": 30,
+    "storedBytesAtVerification": 0
+  },
+  "executionRole": "watermark-staging-batch-execution-role",
+  "jobRole": "watermark-staging-gpu-job-role"
+}

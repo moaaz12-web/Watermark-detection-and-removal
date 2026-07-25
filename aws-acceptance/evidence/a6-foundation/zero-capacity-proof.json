@@ -1,0 +1,30 @@
+{
+  "recordedAt": "2026-07-25",
+  "region": "eu-north-1",
+  "submissionEnabled": false,
+  "queueState": "DISABLED",
+  "computeDesiredVcpus": 0,
+  "batchJobs": {
+    "SUBMITTED": 0,
+    "PENDING": 0,
+    "RUNNABLE": 0,
+    "STARTING": 0,
+    "RUNNING": 0
+  },
+  "ec2InstancesNonTerminated": 0,
+  "ebsVolumes": 0,
+  "activeSpotRequests": 0,
+  "natGatewaysPendingOrAvailable": 0,
+  "elasticIps": 0,
+  "applicationOrNetworkLoadBalancers": 0,
+  "classicLoadBalancers": 0,
+  "batchAutoScalingGroups": 0,
+  "ecs": {
+    "registeredContainerInstances": 0,
+    "runningTasks": 0,
+    "pendingTasks": 0,
+    "activeServices": 0
+  },
+  "gpuInstancesLaunchedByA6": 0,
+  "workerVolumesCreatedByA6": 0
+}

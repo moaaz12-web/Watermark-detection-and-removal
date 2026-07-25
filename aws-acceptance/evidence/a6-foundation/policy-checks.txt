@@ -1,0 +1,21 @@
+A6 live IAM and submission-boundary checks
+Date: 2026-07-25
+Region: eu-north-1
+
+Submission Lambda role:
+- DynamoDB GetItem, PutItem, and UpdateItem are scoped to the staging ledger.
+- CloudWatch CreateLogStream and PutLogEvents are scoped to the staging Lambda log group.
+- batch:SubmitJob is scoped to:
+  - arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu
+  - arn:aws:batch:eu-north-1:154959837939:job-definition/watermark-staging-worker:1
+  - the account's eu-north-1 Batch job ARN space
+- batch:TerminateJob is scoped to the account's eu-north-1 Batch job ARN space.
+- batch:ListJobs and batch:DescribeJobs use Resource="*" as required by AWS Batch.
+- every Batch statement has aws:RequestedRegion=eu-north-1.
+- there is no batch:*, iam:*, ec2:*, or iam:PassRole permission.
+
+Runtime boundary:
+- Lambda SUBMISSION_ENABLED=false.
+- Batch queue state=DISABLED.
+- The exact queue and job-definition revision ARNs are present in Lambda environment.
+- No infrastructure field can be supplied through the submission request.

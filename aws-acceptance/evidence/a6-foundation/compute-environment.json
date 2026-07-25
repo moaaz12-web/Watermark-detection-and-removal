@@ -1,0 +1,48 @@
+{
+  "recordedAt": "2026-07-25",
+  "region": "eu-north-1",
+  "name": "watermark-staging-gpu",
+  "arn": "arn:aws:batch:eu-north-1:154959837939:compute-environment/watermark-staging-gpu",
+  "type": "MANAGED",
+  "state": "ENABLED",
+  "status": "VALID",
+  "statusReason": "ComputeEnvironment Healthy",
+  "computeResources": {
+    "type": "EC2",
+    "allocationStrategy": "BEST_FIT",
+    "instanceTypes": ["g4dn.xlarge"],
+    "minvCpus": 0,
+    "desiredvCpus": 0,
+    "maxvCpus": 4,
+    "imageType": "ECS_AL2023_NVIDIA",
+    "subnets": [
+      "subnet-05efb9299506cd3cc",
+      "subnet-080788df53faea280"
+    ],
+    "securityGroupIds": ["sg-0f4f5aef5ca0f790e"],
+    "launchTemplateId": "lt-065f3bc9a1b9275ec"
+  },
+  "launchTemplate": {
+    "amiPinned": false,
+    "sshKeyConfigured": false,
+    "userDataConfigured": false,
+    "imdsv2Required": true,
+    "metadataHopLimit": 1,
+    "rootVolume": {
+      "type": "gp3",
+      "sizeGiB": 200,
+      "encrypted": true,
+      "deleteOnTermination": true
+    }
+  },
+  "network": {
+    "vpcId": "vpc-084052c6992b57ec4",
+    "internetGatewayId": "igw-00e1f244cfa9a0126",
+    "ingressRules": 0,
+    "egress": [
+      "tcp/443 to 0.0.0.0/0",
+      "tcp/53 to 10.40.0.2/32",
+      "udp/53 to 10.40.0.2/32"
+    ]
+  }
+}

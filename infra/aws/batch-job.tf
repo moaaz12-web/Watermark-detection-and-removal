@@ -40,24 +40,24 @@ resource "aws_batch_job_definition" "gpu_worker" {
     ]
     environment = [
       {
-        name  = "COMPUTE_PROVIDER"
-        value = "AWS_BATCH"
-      },
-      {
         name  = "AWS_REGION"
         value = var.aws_region
+      },
+      {
+        name  = "COMPUTE_PROVIDER"
+        value = "AWS_BATCH"
       },
       {
         name  = "GCP_PROJECT_ID"
         value = var.gcp_project_id
       },
       {
-        name  = "GCP_WIF_AUDIENCE"
-        value = local.gcp_wif_audience
-      },
-      {
         name  = "GCP_SERVICE_ACCOUNT_IMPERSONATION_URL"
         value = local.gcp_worker_impersonation_url
+      },
+      {
+        name  = "GCP_WIF_AUDIENCE"
+        value = local.gcp_wif_audience
       },
     ]
     executionRoleArn       = aws_iam_role.batch_execution.arn
@@ -82,7 +82,6 @@ resource "aws_batch_job_definition" "gpu_worker" {
     volumes = [
       {
         name = "worker-scratch"
-        host = {}
       },
     ]
     mountPoints = [

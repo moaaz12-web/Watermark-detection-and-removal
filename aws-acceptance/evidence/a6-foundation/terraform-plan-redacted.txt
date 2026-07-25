@@ -1,0 +1,38 @@
+A6 AWS Batch foundation plan/apply evidence
+Date: 2026-07-25
+Region: eu-north-1
+Environment: staging
+
+Reviewed saved plan:
+- 23 resources to add
+- 2 resources to update in place
+- 0 resources to destroy
+- no replacement actions
+
+Expected additions included the dedicated VPC, two public subnets, internet gateway, route
+table, no-ingress security group, Batch roles/profile, launch template, managed compute
+environment, disabled queue, digest-pinned job definition, worker log group, and Batch
+service-linked role.
+
+Forbidden-resource review:
+- no direct aws_instance
+- no standalone aws_ebs_volume
+- no NAT gateway
+- no Elastic IP
+- no load balancer
+- no Spot request
+- no SSH key
+
+Apply result:
+- 23 added
+- 2 changed
+- 0 destroyed
+- no Batch job submitted
+
+Post-apply normalization fix:
+AWS normalized job-definition environment ordering and omitted empty container fields. The
+Terraform representation was aligned with the provider's stable representation. Focused tests
+and validation passed afterward.
+
+Final post-apply plan:
+No changes. Your infrastructure matches the configuration.

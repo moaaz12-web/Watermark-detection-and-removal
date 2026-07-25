@@ -1,0 +1,16 @@
+{
+  "recordedAt": "2026-07-25",
+  "region": "eu-north-1",
+  "name": "watermark-staging-gpu",
+  "arn": "arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+  "state": "DISABLED",
+  "status": "VALID",
+  "statusReason": "JobQueue Healthy",
+  "priority": 1,
+  "computeEnvironmentOrder": [
+    {
+      "order": 1,
+      "computeEnvironment": "arn:aws:batch:eu-north-1:154959837939:compute-environment/watermark-staging-gpu"
+    }
+  ]
+}

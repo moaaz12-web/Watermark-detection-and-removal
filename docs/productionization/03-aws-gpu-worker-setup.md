@@ -1,8 +1,9 @@
 # AWS GPU Watermark Worker: Hybrid Production Setup Plan
 
-Status: Active implementation plan; A0, A1, A3, A4, and A5 complete. A2 is complete in this
+Status: Active implementation plan; A0, A1, A3, A4, A5, and A6 complete. A2 is complete in this
 repository, with the external FastAPI repository mirror still pending. The tested A5 Linux AMD64
-worker image is published to private ECR under an immutable tag and digest.
+worker image is published to private ECR under an immutable tag and digest, and the bounded A6
+Batch foundation is deployed, valid, disabled, and at zero compute capacity.
 
 Last updated: 2026-07-25
 
@@ -79,16 +80,19 @@ Current GCP project `project-5909a738-2fdc-451e-ad6`:
 
 Current AWS status:
 
-- A3 submission-boundary infrastructure is deployed from `infra/aws/`, and redacted verification
-  artifacts are stored under `aws-acceptance/evidence/`.
+- A3-A6 submission, identity, image, and disabled Batch infrastructure is deployed from
+  `infra/aws/`, and redacted verification artifacts are stored under
+  `aws-acceptance/evidence/`.
 - The authenticated AWS account identity was verified; the initial target account ends in `7939`.
 - `eu-north-1` (Europe/Stockholm) is formally selected for the initial implementation and GPU
   acceptance.
 - The regional `Running On-Demand G and VT instances` quota is `4` vCPUs, sufficient for one
   `g4dn.xlarge`, and that instance type is offered in `eu-north-1a`, `eu-north-1b`, and
   `eu-north-1c`.
-- A read-only account scan found no active EC2, Batch, NAT Gateway, EBS, ECR, Lambda, API Gateway,
-  DynamoDB, RDS, SageMaker, load-balancer, or other reviewed billable workload resources.
+- The private ECR repository contains the accepted A5 image. The A6 Batch compute environment,
+  disabled queue, job definition, network, roles, and empty worker log group exist, but there are
+  no Batch jobs, EC2 instances, EBS volumes, Spot requests, NAT Gateways, Elastic IPs, load
+  balancers, ECS container instances, or ECS tasks.
 - The account remains on the AWS Free Plan, which blocks `g4dn.xlarge` even though quota is
   approved. Paid Plan activation is an A7 prerequisite for live acceptance.
 - Global monthly AWS cost budget `watermark-aws-monthly` is healthy at `$60`, with actual-spend
@@ -104,8 +108,12 @@ Current AWS status:
   `watermark-aws` WIF pool, exact-role `staging` provider, and empty-permission AWS Batch job role
   are deployed.
 - The A3 API Gateway HTTP API, native Google JWT authorizer, submission Lambda, DynamoDB ledger,
-  redacted logs, throttling, and alarms are deployed in disabled-submit mode. The ledger is empty,
-  and no Batch, EC2, EBS, or NAT Gateway resource exists.
+  redacted logs, throttling, and alarms are deployed in disabled-submit mode. Lambda is wired to
+  the exact A6 queue and job-definition revision, while both submission and the queue remain
+  disabled.
+- The A6 managed compute environment is `VALID` with `BEST_FIT`, `g4dn.xlarge` only,
+  `min=0`, `desired=0`, `max=4`, and `ECS_AL2023_NVIDIA`. Job definition revision `1` uses the
+  exact A5 digest, one GPU, 4 vCPUs, 14336 MiB memory, one attempt, and a 5400-second timeout.
 - The existing `watermark-gpu-worker` service account has no user-managed key. It may be
   impersonated only by the exact staging GPU job role and has conditional GCS read/create access
   only under `gpu_acceptance/` plus model read access under `watermark-v1/`.
@@ -1900,11 +1908,15 @@ Dependencies: A4 code/configuration design. Estimated scope: two medium sessions
 Purpose: create a disabled/idle AWS Batch foundation whose hard limits make more than one
 `g4dn.xlarge` impossible. Creating A6 must not launch a GPU.
 
-Implementation status (2026-07-25): the Terraform, Lambda adapter update, static safety tests, and
-local validation are complete. The configuration has **not** been planned or applied for A6.
-`worker_image_digest=""`, `batch_queue_enabled=false`, and `submission_enabled=false` are the
-current safe hold while the A5 ECR upload finishes. No A6 AWS resource or GPU was created by this
-implementation session.
+Implementation status (2026-07-25): Complete. A reviewed saved Terraform plan added 23 resources,
+updated 2 in place, destroyed 0, and was applied successfully. The managed compute environment and
+queue are `VALID`; the queue is `DISABLED`; Lambda submission is `false`; and job definition
+`watermark-staging-worker:1` uses the exact A5 digest
+`sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218`.
+The final Terraform plan reports no changes. No job was submitted and live verification found zero
+EC2 instances, EBS volumes, ECS container instances/tasks, Spot requests, NAT Gateways, Elastic
+IPs, or load balancers. Evidence:
+[A6 Batch foundation](../../aws-acceptance/evidence/a6-foundation/).
 
 #### A6.1 Create the low-baseline network
 
@@ -2038,7 +2050,7 @@ After queue/job-definition creation:
 1. update Lambda environment to the exact queue/job-definition ARN;
 2. add resource-scoped Batch permissions;
 3. keep `SUBMISSION_ENABLED=false`;
-4. enable the job queue only after static inspection;
+4. keep the job queue disabled through A6; enabling it is part of the explicit A7 cost checkpoint;
 5. run `terraform plan` again and require no unexpected changes; and
 6. query the deployed resources with `describe-*`.
 
@@ -2098,20 +2110,21 @@ Acceptance:
 - [x] Local Terraform permits only `g4dn.xlarge` and maximum 4 vCPUs.
 - [x] Queue, job definition, Lambda wiring, and submission adapter pass static tests.
 - [x] Terraform formatting and local provider-schema validation pass.
-- [ ] Queue and digest-pinned job-definition revision are valid.
-- [ ] Resources, roles, timeout, attempts, logs, storage, and network match the runbook.
+- [x] Queue and digest-pinned job-definition revision are valid.
+- [x] Resources, roles, timeout, attempts, logs, storage, and network match the runbook.
 - [x] Lambda cannot accept infrastructure overrides and remains submission-disabled in code.
-- [ ] No GPU instance, EBS worker volume, NAT gateway, or other unexpected resource is running.
+- [x] No GPU instance, EBS worker volume, NAT gateway, or other unexpected resource is running.
 
 Dependencies: A4 and A5. Estimated scope: three medium sessions.
 
 ### Checkpoint: AWS foundation
 
-- [ ] A0-A6 acceptance evidence is reviewed.
-- [ ] No GPU acceptance job has been submitted without explicit cost/quota authorization.
-- [ ] No long-lived cross-cloud credentials exist.
+- [x] A0-A6 repository acceptance evidence is reviewed; the separate A2 FastAPI mirror remains
+  pending.
+- [x] No GPU acceptance job has been submitted without explicit cost/quota authorization.
+- [x] No long-lived cross-cloud credentials exist.
 - [ ] AWS account is on the Paid Plan; Free Plan cannot launch `g4dn.xlarge`.
-- [ ] Submission remains disabled and current EC2/EBS/GPU capacity is zero.
+- [x] Submission remains disabled and current EC2/EBS/GPU capacity is zero.
 - [ ] The operator approves the estimated one-image acceptance cost and a maximum of one live
   `g4dn.xlarge`.
 
