@@ -81,6 +81,21 @@ def test_gpu_container_packages_source_without_models_or_runtime_fetches() -> No
     assert "wget " not in content
 
 
+def test_gpu_container_routes_third_party_caches_to_writable_scratch() -> None:
+    content = gpu_dockerfile()
+
+    assert "HF_HOME=/tmp/watermark-worker/huggingface" in content
+    assert (
+        "TRANSFORMERS_CACHE=/tmp/watermark-worker/huggingface/transformers"
+        in content
+    )
+    assert (
+        "HUGGINGFACE_HUB_CACHE=/tmp/watermark-worker/huggingface/hub"
+        in content
+    )
+    assert "XDG_CACHE_HOME=/tmp/watermark-worker/cache" in content
+
+
 def test_gpu_container_runs_the_worker_as_non_root() -> None:
     content = gpu_dockerfile()
 

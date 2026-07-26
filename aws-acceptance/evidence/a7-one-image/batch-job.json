@@ -1,0 +1,24 @@
+{
+  "applicationJobId": "aws_a7_one_20260725t183304z",
+  "providerJobId": "44d5d030-b405-4bf9-b655-71b464cb56da",
+  "providerJobArn": "arn:aws:batch:eu-north-1:154959837939:job/44d5d030-b405-4bf9-b655-71b464cb56da",
+  "jobQueue": "watermark-staging-gpu",
+  "jobDefinition": "watermark-staging-worker:1",
+  "imageDigest": "sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218",
+  "resourceRequirements": {
+    "vcpus": 4,
+    "memoryMiB": 14336,
+    "gpus": 1
+  },
+  "attemptsConfigured": 1,
+  "timeoutSeconds": 5400,
+  "createdAtEpochMs": 1785012052624,
+  "startedAtEpochMs": 1785012459410,
+  "stoppedAtEpochMs": 1785012660406,
+  "queueToStartSeconds": 406.786,
+  "containerRuntimeSeconds": 200.996,
+  "status": "FAILED",
+  "statusReason": "Essential container in task exited",
+  "exitCode": 10,
+  "cloudWatchLogStream": "worker/default/747a1718ca5e4a86be087d8d7d543527"
+}

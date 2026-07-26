@@ -1,0 +1,20 @@
+{
+  "prefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_one_20260725t183304z/",
+  "objectsAfterRun": [
+    {
+      "name": "asset_1.png",
+      "sizeBytes": 105906,
+      "generation": "1785004390776455"
+    },
+    {
+      "name": "input-manifest.json",
+      "sizeBytes": 629,
+      "generation": "1785004452804054"
+    }
+  ],
+  "itemResultPresent": false,
+  "itemCompleteMarkerPresent": false,
+  "outputManifestPresent": false,
+  "jobCompleteMarkerPresent": false,
+  "result": "FAIL_NO_OUTPUT_WRITTEN"
+}

@@ -1,0 +1,17 @@
+A7 live GPU device evidence
+Recorded: 2026-07-25 UTC
+
+Instance ID: i-0f39b5f6395c2ca6e
+Instance type: g4dn.xlarge
+AMI ID: ami-0965bebce0437f0fd
+GPU device index: 0
+GPU device name: Tesla T4
+CUDA capability: 7.5
+PyTorch version: 2.5.1+cu121
+Container user: 10001:10001
+Read-only root filesystem: true
+Scratch mount: /tmp/watermark-worker
+
+Result: GPU discovery passed. The pipeline failed later while initializing the
+background-removal runtime because a third-party Hugging Face cache defaulted to
+the read-only /home/watermark-worker/.cache path.

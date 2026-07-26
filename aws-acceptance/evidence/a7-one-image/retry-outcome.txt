@@ -1,0 +1,59 @@
+A7 second one-image attempt
+Date: 2026-07-26
+Region: eu-north-1
+
+Identity:
+- applicationJobId: aws_a7_retry_20260725t221122z
+- providerJobId: e8e7fcb8-817c-419b-a525-cfc6da9a2e48
+- job definition: watermark-staging-worker:2
+- image digest:
+  sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+
+Passed:
+- The authenticated API returned 202.
+- An identical replay returned the same provider job ID.
+- Submission was closed after the replay.
+- Revision 2 used writable Hugging Face cache paths.
+- Tesla T4, CUDA capability 7.5, and PyTorch 2.5.1+cu121 were confirmed.
+- Background removal initialized, ran, and released.
+- Detection initialized, ran, and released.
+
+Failed:
+- Inpainting initialization exited 3 with MODEL_CHECKSUM_MISMATCH.
+- No item result, output manifest, or completion marker was written.
+
+Root cause:
+- The LaMa GCS object matched the pinned SHA-256
+  f1b358ca24093b93a106183b98a3dea6e8ed09f3b43ea7251eb2c81e7b4575f6.
+- The archive contained exactly one big-lama/config.yaml and
+  big-lama/models/best.ckpt.
+- saicinpainting.evaluation.__init__ eagerly imported training-only evaluator modules.
+- Importing the inference helper saicinpainting.evaluation.utils therefore raised:
+  ModuleNotFoundError: No module named 'models'
+- import_runtime_module classified that ImportError as the generic model validation code.
+
+Local fix:
+- Training-only evaluator imports are lazy inside make_evaluator.
+- Inference helper imports no longer load evaluation.losses.base_loss.
+- Focused unit result: 8 passed.
+- Ruff result: passed.
+- Existing image plus the corrected source mount successfully imported
+  evaluation.utils and evaluation.data.
+- No corrected image has been built, pushed, deployed, or submitted.
+
+Estimated AWS cost:
+- EC2 instance window: 485 seconds.
+- EC2 estimate: USD 0.075175.
+- 200 GB gp3 estimate: USD 0.003086.
+- Public IPv4 estimate: USD 0.000674.
+- Total deterministic estimate: USD 0.078934 before logs and cross-cloud transfer.
+
+Cleanup:
+- Batch queue: DISABLED and VALID.
+- Submission: false.
+- Compute environment desired vCPUs: 0.
+- Active Batch jobs: 0.
+- EC2 instances: 0.
+- EBS volumes: 0.
+- Auto Scaling group desired/instances: 0/0.
+- ECS running tasks/container instances: 0/0.

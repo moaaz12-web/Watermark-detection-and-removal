@@ -1,12 +1,19 @@
 import logging
 
-import torch
-
-from saicinpainting.evaluation.evaluator import InpaintingEvaluatorOnline, ssim_fid100_f1, lpips_fid100_f1
-from saicinpainting.evaluation.losses.base_loss import SSIMScore, LPIPSScore, FIDScore
-
 
 def make_evaluator(kind='default', ssim=True, lpips=True, fid=True, integral_kind=None, **kwargs):
+    # Evaluation is training-only. Keep its heavy optional dependencies lazy so
+    # importing inference helpers such as evaluation.utils and evaluation.data
+    # does not require the unbundled evaluator model package.
+    import torch
+
+    from saicinpainting.evaluation.evaluator import (
+        InpaintingEvaluatorOnline,
+        lpips_fid100_f1,
+        ssim_fid100_f1,
+    )
+    from saicinpainting.evaluation.losses.base_loss import FIDScore, LPIPSScore, SSIMScore
+
     logging.info(f'Make evaluator {kind}')
     device = "cuda" if torch.cuda.is_available() else "cpu"
     metrics = {}

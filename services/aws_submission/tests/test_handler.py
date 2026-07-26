@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
+from typing import Any
 
 from aws_submission.handler import handle_event
 from aws_submission.models import ProviderStatus, StatusResponse
-from aws_submission.service import SubmissionDisabled
+from aws_submission.service import SubmissionDisabled, SubmissionFailed
 
 EXPECTED_SUBJECT = "112010400000000710080"
 
@@ -29,6 +31,15 @@ class FakeService:
     def cancel(self, application_job_id: str, reason_code: str) -> StatusResponse:
         self.calls.append("cancel")
         return self.status(application_job_id)
+
+
+class ProviderFailingService(FakeService):
+    def submit(self, application_job_id: str, request: object) -> object:
+        self.calls.append("submit")
+        try:
+            raise ValueError("ClientException: diagnostic detail")
+        except ValueError as exc:
+            raise SubmissionFailed from exc
 
 
 def event(
@@ -95,6 +106,24 @@ def test_authenticated_submit_is_stably_disabled() -> None:
     assert response["statusCode"] == 503
     assert json.loads(response["body"])["error"]["code"] == "AWS_GPU_SUBMISSION_DISABLED"
     assert service.calls == ["submit"]
+
+
+def test_provider_submission_failure_is_logged_internally(caplog: Any) -> None:
+    service = ProviderFailingService()
+
+    with caplog.at_level(logging.ERROR):
+        response = handle_event(
+            event(
+                "PUT /internal/v1/gpu-jobs/{applicationJobId}",
+                body=submit_body(),
+            ),
+            service=service,
+            expected_subject=EXPECTED_SUBJECT,
+        )
+
+    assert response["statusCode"] == 502
+    assert "provider_submission_failed" in caplog.text
+    assert "ClientException: diagnostic detail" in caplog.text
 
 
 def test_exact_status_route_returns_provider_neutral_status() -> None:

@@ -1,0 +1,25 @@
+A7 phases 2-4 outcome: FAILED ACCEPTANCE, CLEANED UP
+
+Passed:
+- Authenticated API submission returned HTTP 202.
+- Identical replay returned the same AWS Batch job ID.
+- Exactly one Batch job and one g4dn.xlarge were created.
+- Submission was disabled immediately after replay.
+- Tesla T4, CUDA capability 7.5, and PyTorch 2.5.1+cu121 were proven.
+- Keyless WIF manifest, source, and pinned model reads progressed to runtime initialization.
+- One-attempt and 90-minute safety boundaries held.
+- Queue, EC2, EBS, ECS, public-IP, NAT, EIP, and load-balancer cleanup passed.
+
+Failed:
+- Background-removal initialization attempted to use
+  /home/watermark-worker/.cache/huggingface/hub on a read-only root filesystem.
+- The worker exited 10 with UNEXPECTED_FATAL.
+- No item result, output manifest, or completion marker was written.
+
+Required before another separately approved billable attempt:
+- Route Hugging Face/Transformers caches to the writable scratch mount, for example under
+  /tmp/watermark-worker.
+- Add a local read-only-root regression test.
+- Build and push a new immutable worker image digest.
+- Update the Batch job definition through Terraform.
+- Repeat A7 only after a fresh cost and one-job approval.

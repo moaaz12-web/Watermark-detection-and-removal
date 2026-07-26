@@ -1,0 +1,36 @@
+A7 controlled-enable Terraform plan preview
+Recorded: 2026-07-25
+Status: REVIEWED BUT NOT APPLIED
+
+Plan summary:
+- 0 to add
+- 3 to change in place
+- 0 to destroy
+
+Meaningful changes:
+- aws_batch_job_queue.gpu: DISABLED -> ENABLED
+- aws_lambda_function.submission:
+  SUBMISSION_ENABLED false -> true
+
+Expected dependency refresh:
+- aws_iam_role_policy.submission_lambda is recomputed because it references the queue.
+- The reviewed Batch actions, exact queue/job-definition resources, and eu-north-1 region
+  restriction remain the same.
+
+No change to:
+- compute environment
+- min/desired/max vCPUs
+- g4dn.xlarge restriction
+- image digest
+- job-definition revision
+- CPU, memory, or GPU count
+- attempt count or timeout
+- task/execution roles
+- network, storage, or logging
+
+Safety closure:
+- The saved plan was not applied.
+- The ignored staging tfvars were restored to:
+  submission_enabled=false
+  batch_queue_enabled=false
+- A final disabled-state plan reported no changes.

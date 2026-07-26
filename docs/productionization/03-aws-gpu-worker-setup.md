@@ -1012,18 +1012,20 @@ aws batch describe-job-queues
 Build and publish:
 
 ```bash
-aws ecr get-login-password --region OWNER_SUPPLIED_AWS_REGION \
-  | docker login --username AWS --password-stdin OWNER_SUPPLIED_ECR_REGISTRY
-
-docker build \
-  --platform linux/amd64 \
-  --build-arg GPU_BASE_IMAGE=REVIEWED_GPU_BASE_IMAGE_BY_DIGEST \
-  --file Dockerfile.gpu \
-  --tag OWNER_SUPPLIED_ECR_REPOSITORY:BUILD_ID \
-  .
-
-docker push OWNER_SUPPLIED_ECR_REPOSITORY:BUILD_ID
+export AWS_REGION=eu-north-1
+export CODEBUILD_PROJECT_NAME=watermark-staging-worker-image-build
+export CODEBUILD_SOURCE_BUCKET=watermark-staging-codebuild-source-154959837939
+infra/aws/scripts/start-worker-image-build.sh BUILD_ID
 ```
+
+This is an explicitly started remote build, not a local Docker build and not part of the Batch GPU
+runtime. The helper uploads a small reviewed source ZIP to private S3. The on-demand CodeBuild
+project builds the Linux AMD64 image, reuses a BuildKit registry cache in
+`watermark-staging-worker-build-cache`, runs a CPU-only import check, and pushes the new immutable
+release tag to `watermark-staging-worker`. No GPU or EC2 Batch capacity is created by the build.
+Use a new release tag for every attempt and record the resulting digest. Exact monitoring and
+failure-handling commands are in the
+[A7 manual operator runbook](04-a7-manual-operator-runbook.md).
 
 Manual acceptance submission:
 
@@ -2123,9 +2125,9 @@ Dependencies: A4 and A5. Estimated scope: three medium sessions.
   pending.
 - [x] No GPU acceptance job has been submitted without explicit cost/quota authorization.
 - [x] No long-lived cross-cloud credentials exist.
-- [ ] AWS account is on the Paid Plan; Free Plan cannot launch `g4dn.xlarge`.
+- [x] AWS account is on the Paid Plan; the Free Tier API reports plan status `ACTIVE`.
 - [x] Submission remains disabled and current EC2/EBS/GPU capacity is zero.
-- [ ] The operator approves the estimated one-image acceptance cost and a maximum of one live
+- [x] The operator approves the estimated one-image acceptance cost and a maximum of one live
   `g4dn.xlarge`.
 
 ### A7. Run one-image GPU acceptance
@@ -2133,6 +2135,98 @@ Dependencies: A4 and A5. Estimated scope: three medium sessions.
 Purpose: spend money for the first time and prove the exact deployed identity, image, GPU, storage,
 and cleanup path with one image. A7 requires a fresh explicit go-ahead immediately before
 submission.
+
+Phase 1 status (2026-07-25): Complete without GPU spend. The Paid Plan, quota, zero-capacity
+state, A5 digest, current pricing, selected local PNG, create-only GCS upload, pinned one-image
+manifest, pinned model generations, empty output prefix, canonical A2 request, and enable-only
+Terraform plan are recorded under
+[A7 one-image evidence](../../aws-acceptance/evidence/a7-one-image/). The plan was not applied;
+the queue and submission remain disabled; and the final disabled-state plan reports no changes.
+After explicit approval, `moaaz7151@gmail.com` received
+`roles/iam.serviceAccountTokenCreator` on only `watermark-aws-orchestrator`. A temporary token with
+the exact staging audience was held only in process memory; the authenticated nonexistent-job GET
+returned `404 AWS_GPU_NOT_FOUND`, proving API Gateway and exact-subject Lambda authorization
+without creating a ledger entry or Batch job.
+
+Phases 2-4 status (2026-07-26): Attempted once; A7 remains incomplete. The queue and submission
+gate were enabled through Terraform, and the canonical request was accepted as Batch job
+`44d5d030-b405-4bf9-b655-71b464cb56da`. An identical replay returned the same provider job ID,
+after which submission was disabled. The first pre-submission failures exposed a missing
+`batch:TagResource` dependent permission for tagged `SubmitJob` calls; the policy was corrected
+with the same fixed queue, job-definition, and account job ARN scope, and the Lambda now records
+the internal AWS exception while continuing to return the stable redacted API error envelope.
+
+The one live job created exactly one `g4dn.xlarge` and proved a Tesla T4, CUDA capability `7.5`,
+PyTorch `2.5.1+cu121`, the A5 image digest, and keyless WIF reads of the pinned manifest, source,
+and selected model artifacts. It then failed with exit code `10` during
+`background_removal` initialization because Hugging Face defaulted its cache to the read-only
+`/home/watermark-worker/.cache` path. No detection/inpainting stage or GCS result marker ran, and
+no retry was submitted. The queue is `DISABLED`, submission is false, desired vCPUs are zero, the
+sole EC2 instance is terminated, its delete-on-termination EBS volume is gone, ECS capacity is
+empty, and no NAT gateway, Elastic IP, or load balancer exists. The deterministic AWS runtime
+estimate is `$0.071122` before CloudWatch and cross-cloud data transfer. Full evidence and the
+required cache-path remediation steps are under
+[A7 one-image evidence](../../aws-acceptance/evidence/a7-one-image/).
+
+Runtime cache remediation status (2026-07-26): Complete without a GPU run, local image rebuild,
+or ECR upload. Terraform registered `watermark-staging-worker:2` using the unchanged A5 image
+digest and configured `HF_HOME`, `TRANSFORMERS_CACHE`, `HUGGINGFACE_HUB_CACHE`, and
+`XDG_CACHE_HOME` beneath the writable `/tmp/watermark-worker` scratch mount. Lambda and its
+submission policy now reference revision 2. The queue remains `DISABLED`, submission remains
+false, desired vCPUs remain zero, and live AWS CLI checks found no active Batch jobs, EC2
+instances, EBS volumes, Spot requests, ECS tasks, or ECS container instances. The post-apply
+Terraform plan reports no changes. Dockerfile defaults contain the same paths for the next natural
+image release, but that release is not required for the next controlled A7 retry.
+
+Second live attempt status (2026-07-26): Failed later in the pipeline and cleaned up. Fresh
+application job `aws_a7_retry_20260725t221122z` mapped idempotently to Batch job
+`e8e7fcb8-817c-419b-a525-cfc6da9a2e48`. Revision 2 fixed the original cache failure:
+background removal and detection both initialized and ran on the T4. Inpainting then exited `3`
+with the generic `MODEL_CHECKSUM_MISMATCH` code before producing GCS results. Offline reproduction
+proved that the pinned LaMa archive checksum and layout were correct. The actual failure was an
+eager import in `saicinpainting.evaluation.__init__` that loaded training-only evaluator modules
+and raised `ModuleNotFoundError: No module named 'models'` when the inference runtime imported
+`evaluation.utils`. Those evaluator imports are now lazy and a regression test protects the
+inference-only import boundary.
+
+Image remediation deployment status (2026-07-26): The fix was remotely built as
+`a7-lama-fix-20260726-1`, passed the build-phase CPU import check, and was pushed at digest
+`sha256:596493d0665a053a52861ad0b3b585700c2f329238d01ae4a5583e82c656d95d`.
+The first CodeBuild run was marked failed only after the push because its final digest lookup lacked
+`ecr:DescribeImages`; that scoped permission is now deployed and regression-tested. No rebuild is
+required. Terraform registered `watermark-staging-worker:3` with the new digest and updated Lambda
+to reference revision 3 while keeping submission false and the queue disabled. Desired vCPUs are
+zero, and live checks found no EC2 instances or EBS volumes.
+
+Final one-image acceptance status (2026-07-26): **Succeeded and cleaned up.** Fresh application job
+`aws_a7_lama_fix_20260726t095002z` mapped idempotently to the single Batch job
+`0f660e5f-580c-452a-8af7-7540f84b9d3d`. Revision 3 ran on one `g4dn.xlarge` with a Tesla T4,
+PyTorch `2.5.1+cu121`, and CUDA capability `7.5`. Background removal, detection, and LaMa
+inpainting all initialized, ran, and released successfully. The item completed with decision
+`INPAINTED`; the final PNG, per-item completion marker, job completion marker, result JSON, and
+output manifest were written to the isolated GCS prefix. The container exited `0` after about
+231 seconds. The instance existed for about 500 seconds, giving an estimated AWS runtime cost of
+`$0.081375` before delayed CloudWatch, transfer, credits, and taxes.
+
+Cleanup is complete: submission is false, the queue is `DISABLED`, desired vCPUs are zero, and
+there are no active Batch jobs, EC2 instances, EBS volumes, ECS tasks/container instances, Spot
+requests, NAT gateways, Elastic IPs, or load balancers. Terraform reports no changes. Redacted
+evidence is in
+[the final A7 outcome](../../aws-acceptance/evidence/a7-one-image/lama-fix-run-outcome.json).
+
+Remote image-build path status (2026-07-26): Deployed and first build completed. Terraform created the
+private short-lived source bucket, mutable ECR BuildKit cache repository, scoped CodeBuild role,
+14-day CloudWatch log group, and on-demand project
+`watermark-staging-worker-image-build`. The project has no webhook or pipeline and Terraform cannot
+start a build. The first operator-started build populated the source and cache repositories and
+pushed the corrected release image. The Batch queue remains disabled with desired vCPUs zero, and
+there are no active Batch jobs, EC2 instances, or EBS volumes.
+
+Operational ownership after this attempt is intentionally split. Codex fixes and locally verifies
+reported errors only. The operator explicitly starts and monitors the remote image build, performs
+Terraform deployment, authentication, one-job submission, monitoring, and cleanup using the
+[A7 manual operator runbook](04-a7-manual-operator-runbook.md). A new GPU attempt requires a fresh
+job ID and explicit operator action.
 
 #### A7.1 Pre-submit safety check
 
@@ -2162,13 +2256,17 @@ Require:
 - one-image manifest and every source/model generation pinned; and
 - expected output prefix empty.
 
-Estimate `$0.87` for a full 90-minute GPU/storage window plus logs/network. Stop and ask before
-submitting if any value differs.
+The live AWS Price List check on 2026-07-25 reports `$0.558` per On-Demand Linux
+`g4dn.xlarge` hour, `$0.0836` per `gp3` GB-month, and `$0.005` per in-use public IPv4 hour.
+The deterministic 90-minute ceiling is approximately `$0.8789` before logs and data transfer.
+Refresh the prices and stop for explicit approval immediately before submitting.
 
 #### A7.2 Enable exactly one controlled submission
 
-Set `SUBMISSION_ENABLED=true` through a reviewed Terraform plan without changing any queue,
-definition, role, resource, timeout, or network field.
+Set `batch_queue_enabled=true` and `submission_enabled=true` together through a reviewed Terraform
+plan. The queue was deliberately left disabled in A6, so both gates are required for the one
+controlled submission. Do not change the definition, role, resource, timeout, network, or any
+other field.
 
 Obtain a Google-signed ID token from the exact `watermark-aws-orchestrator` service account with
 audience `urn:watermark:aws-gpu-submission:staging`. Invoke the internal `PUT` once using the A2
@@ -2180,29 +2278,29 @@ Immediately:
 1. record the sanitized API response, provider job ID/ARN, and correlation ID;
 2. repeat the same `PUT` and prove the same provider job ID is returned;
 3. inspect DynamoDB and prove one reservation exists; and
-4. set `SUBMISSION_ENABLED=false` again. The existing job continues; no second job can be created.
+4. set `submission_enabled=false` again while leaving the queue enabled for the accepted job. The
+   existing job continues; no second API job can be created. Disable the queue after the job
+   reaches a terminal state.
 
 #### A7.3 Make WIF the first in-container gate
 
-Before loading any model, the worker:
+Before loading any model, the worker constructs Google credentials through the A4 custom Boto3
+supplier and reads the pinned manifest generation. A successful manifest/model read and
+conditional result write prove the live task-role WIF path. The exact Batch job role plus the A4
+conditional GCS bindings and negative-scope tests prove the denied boundary; do not rebuild the
+accepted 6.5 GB image solely to add a special unrelated-prefix probe. No model initializes if the
+credential exchange or manifest read fails.
 
-1. logs only the non-secret AWS role/account identity fingerprint expected by the acceptance
-   contract;
-2. constructs Google credentials through the A4 custom Boto3 supplier;
-3. reads the pinned manifest generation;
-4. creates and reads one isolated output probe;
-5. proves an unrelated-prefix request is denied; and
-6. removes no object and initializes no model if any identity check fails.
-
-Capture only pass/fail, resource names already approved for evidence, and stable error codes.
+Capture only pass/fail, resource names already approved for evidence, and stable error codes. Use
+Batch job/task metadata to prove the exact task role; do not add credential-fingerprint logging.
 
 #### A7.4 Run and inspect the GPU pipeline
 
 Required evidence:
 
 - instance type `g4dn.xlarge`;
-- one NVIDIA T4 and driver/runtime versions;
-- `torch.cuda.is_available()` true and a small CUDA kernel/tensor operation succeeds;
+- one NVIDIA T4, its CUDA capability, and the packaged PyTorch version;
+- the GPU acceptance recorder starts successfully and real model stages run on CUDA;
 - effective AWS Batch GPU-optimized AMI ID;
 - container image digest exactly matches A5;
 - non-root UID/GID;
@@ -2252,12 +2350,21 @@ Emergency stop:
 
 Acceptance:
 
-- [ ] One replayed API request maps to exactly one On-Demand Batch job.
-- [ ] Live task-role WIF positive/negative GCS checks pass without a key.
-- [ ] One T4 and working CUDA are proven.
+- [x] One replayed API request maps to exactly one On-Demand Batch job.
+- [ ] Live task-role WIF access passes without a key and the A4 negative-scope evidence remains
+  valid. Keyless manifest/source/model reads passed, but conditional GCS result creation was not
+  reached.
+- [x] One T4 and working CUDA are proven.
 - [ ] Required models run in order and compatible GCS completion markers exist.
-- [ ] Actual duration/resource/network/cost evidence is recorded.
-- [ ] EC2 and worker EBS capacity return to zero and submission is disabled.
+- [x] Actual duration/resource/network/cost evidence is recorded, with delayed CloudWatch and GCP
+  transfer charges called out separately.
+- [x] EC2 and worker EBS capacity return to zero and submission is disabled.
+
+Do not start A8. The cache locations and read-only-root regression test are now implemented, and
+Batch job-definition revision 2 supplies those paths at runtime while retaining the accepted A5
+digest. Before a new explicitly approved A7 attempt, repeat the A7 preflight, confirm revision 2
+and zero capacity, review the cost ceiling, and obtain fresh explicit authorization. No image
+rebuild or ECR upload is required for this retry.
 
 Dependencies: Foundation checkpoint and explicit live-cost authorization. Estimated scope: one
 carefully monitored acceptance session.

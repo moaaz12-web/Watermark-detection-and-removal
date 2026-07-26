@@ -88,6 +88,14 @@ def test_a6_job_definition_is_digest_gated_and_gpu_bounded() -> None:
     assert 'privileged=false' in compact
     assert 'attempts=1' in compact
     assert 'attempt_duration_seconds=5400' in compact
+    assert 'name="HF_HOME"' in compact
+    assert 'value="/tmp/watermark-worker/huggingface"' in compact
+    assert 'name="TRANSFORMERS_CACHE"' in compact
+    assert 'value="/tmp/watermark-worker/huggingface/transformers"' in compact
+    assert 'name="HUGGINGFACE_HUB_CACHE"' in compact
+    assert 'value="/tmp/watermark-worker/huggingface/hub"' in compact
+    assert 'name="XDG_CACHE_HOME"' in compact
+    assert 'value="/tmp/watermark-worker/cache"' in compact
 
 
 def test_a6_lambda_batch_permissions_never_use_wildcard_actions() -> None:
@@ -98,6 +106,7 @@ def test_a6_lambda_batch_permissions_never_use_wildcard_actions() -> None:
     assert '"iam:*"' not in text
     assert '"ec2:*"' not in text
     assert "batch:SubmitJob" in text
+    assert "batch:TagResource" in text
     assert "batch:ListJobs" in text
     assert "batch:DescribeJobs" in text
     assert "batch:TerminateJob" in text

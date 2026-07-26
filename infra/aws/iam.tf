@@ -39,8 +39,11 @@ data "aws_iam_policy_document" "submission_lambda" {
     for_each = local.batch_image_ready ? [1] : []
 
     content {
-      sid     = "SubmitOnlyApprovedGpuJob"
-      actions = ["batch:SubmitJob"]
+      sid = "SubmitOnlyApprovedGpuJob"
+      actions = [
+        "batch:SubmitJob",
+        "batch:TagResource",
+      ]
       resources = [
         aws_batch_job_queue.gpu.arn,
         local.batch_job_definition_arn,

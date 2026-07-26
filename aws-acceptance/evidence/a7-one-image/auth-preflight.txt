@@ -1,0 +1,28 @@
+A7 Google-to-AWS authentication preflight
+Recorded: 2026-07-25
+
+Target identity:
+watermark-aws-orchestrator@project-5909a738-2fdc-451e-ad6.iam.gserviceaccount.com
+
+Target audience:
+urn:watermark:aws-gpu-submission:staging
+
+Result:
+PASS
+
+After explicit operator approval, user:moaaz7151@gmail.com received
+roles/iam.serviceAccountTokenCreator on only the orchestrator service account. The binding was
+confirmed from the service-account IAM policy.
+
+A temporary Google ID token was minted with the exact audience and held only in process memory.
+The token was not printed, logged, or stored. An authenticated GET for nonexistent application job
+00000000-0000-4000-8000-000000000000 returned:
+
+- HTTP status: 404
+- error code: AWS_GPU_NOT_FOUND
+- retryable: false
+- correlation ID: corr_0b2c30c7bf2749a7b279887f1b76dbd0
+
+This proves API Gateway accepted the Google token and Lambda accepted the exact orchestrator
+subject. Submission remained disabled, the queue remained disabled, and the GET created no
+DynamoDB ledger item or Batch job.

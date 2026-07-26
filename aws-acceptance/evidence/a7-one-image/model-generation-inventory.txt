@@ -1,0 +1,30 @@
+A7 model generation preflight
+Recorded: 2026-07-25
+
+Every object exists at the generation pinned by model-manifest.json:
+
+rmbg
+generation=1784373193705163 bytes=842260480
+
+grounding-dino
+generation=1784373242618807 bytes=1870376960
+
+yolo
+generation=1784373246216706 bytes=114512018
+
+sam2
+generation=1784373268769437 bytes=898083611
+
+lama
+generation=1784373278901049 bytes=381428720
+
+owlv2-base
+generation=1784373311470702 bytes=1241548800
+
+owlv2-classifier
+generation=1784373320383747 bytes=358478062
+
+Total pinned model bytes: 5706688651
+Total pinned model GiB: 5.3148
+
+The worker verifies each configured SHA-256 after downloading the pinned generation.

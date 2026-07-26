@@ -1,0 +1,29 @@
+{
+  "recordedAt": "2026-07-25T20:52:00Z",
+  "submissionEnabled": false,
+  "jobQueue": {
+    "name": "watermark-staging-gpu",
+    "state": "DISABLED",
+    "status": "VALID"
+  },
+  "computeEnvironment": {
+    "name": "watermark-staging-gpu",
+    "status": "VALID",
+    "minVcpus": 0,
+    "desiredVcpus": 0,
+    "maxVcpus": 4
+  },
+  "autoScalingGroupDesiredInstances": 0,
+  "autoScalingGroupInstances": [],
+  "ec2Instance": {
+    "instanceId": "i-0f39b5f6395c2ca6e",
+    "state": "terminated"
+  },
+  "workerEbsVolumes": [],
+  "runningEcsTasks": [],
+  "ecsContainerInstances": [],
+  "natGateways": [],
+  "elasticIps": [],
+  "loadBalancers": [],
+  "cleanupResult": "PASS_ZERO_BILLABLE_GPU_CAPACITY"
+}

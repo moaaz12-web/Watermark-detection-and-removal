@@ -59,6 +59,22 @@ resource "aws_batch_job_definition" "gpu_worker" {
         name  = "GCP_WIF_AUDIENCE"
         value = local.gcp_wif_audience
       },
+      {
+        name  = "HF_HOME"
+        value = "/tmp/watermark-worker/huggingface"
+      },
+      {
+        name  = "TRANSFORMERS_CACHE"
+        value = "/tmp/watermark-worker/huggingface/transformers"
+      },
+      {
+        name  = "HUGGINGFACE_HUB_CACHE"
+        value = "/tmp/watermark-worker/huggingface/hub"
+      },
+      {
+        name  = "XDG_CACHE_HOME"
+        value = "/tmp/watermark-worker/cache"
+      },
     ]
     executionRoleArn       = aws_iam_role.batch_execution.arn
     jobRoleArn             = aws_iam_role.gpu_job.arn

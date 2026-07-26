@@ -1,0 +1,24 @@
+{
+  "pricingObservedDate": "2026-07-26",
+  "currency": "USD",
+  "billableEstimateSeconds": 437,
+  "rates": {
+    "g4dnXlargePerHour": 0.558,
+    "publicIpv4PerHour": 0.005,
+    "gp3PerGiBMonth": 0.0836,
+    "gp3SizeGiB": 200,
+    "monthHoursAssumption": 730
+  },
+  "estimatedAwsRuntimeCost": {
+    "compute": 0.067735,
+    "publicIpv4": 0.000607,
+    "gp3": 0.00278,
+    "total": 0.071122
+  },
+  "excludedOrDelayed": [
+    "CloudWatch Logs usage",
+    "GCP-to-AWS model and input data transfer",
+    "billing adjustments, credits, and taxes"
+  ],
+  "note": "Cost Explorer is delayed; this is a deterministic runtime estimate, not a posted invoice."
+}

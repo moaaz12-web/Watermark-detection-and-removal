@@ -1,0 +1,35 @@
+A7 runtime cache remediation
+Date: 2026-07-26
+Region: eu-north-1
+
+Outcome:
+- Terraform registered Batch job definition watermark-staging-worker:2.
+- The accepted A5 ECR image digest remained unchanged:
+  sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+- No local image build or ECR push was performed.
+- No Batch job or GPU instance was launched.
+
+Runtime cache paths:
+- HF_HOME=/tmp/watermark-worker/huggingface
+- TRANSFORMERS_CACHE=/tmp/watermark-worker/huggingface/transformers
+- HUGGINGFACE_HUB_CACHE=/tmp/watermark-worker/huggingface/hub
+- XDG_CACHE_HOME=/tmp/watermark-worker/cache
+
+Deployment:
+- Terraform apply: 0 added, 3 changed, 0 destroyed.
+- Lambda BATCH_JOB_DEFINITION_ARN references revision 2.
+- Lambda SUBMISSION_ENABLED=false.
+- Batch queue state=DISABLED and status=VALID.
+- Compute environment desiredvCpus=0 and status=VALID.
+- Post-apply Terraform plan: no changes.
+
+Live AWS CLI cleanup verification:
+- Active Batch jobs across SUBMITTED, PENDING, RUNNABLE, STARTING, and RUNNING: 0.
+- Nonterminated EC2 instances: 0.
+- EBS volumes: 0.
+- Active or open Spot requests: 0.
+- Batch Auto Scaling group desired capacity: 0; instances: 0.
+- Running or pending ECS tasks: 0.
+- ECS container instances: 0.
+
+A fresh explicit cost authorization is still required before retrying the live A7 job.

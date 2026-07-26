@@ -1,0 +1,26 @@
+{
+  "firstAcceptedResponse": {
+    "httpStatus": 202,
+    "applicationJobId": "aws_a7_one_20260725t183304z",
+    "correlationId": "corr_05d4049521034b989f768f899fedeb7d",
+    "provider": "AWS_BATCH",
+    "providerAttempt": 1,
+    "providerJobArn": "arn:aws:batch:eu-north-1:154959837939:job/44d5d030-b405-4bf9-b655-71b464cb56da",
+    "providerJobId": "44d5d030-b405-4bf9-b655-71b464cb56da",
+    "schemaVersion": 1,
+    "status": "SUBMITTED"
+  },
+  "identicalReplayResponse": {
+    "httpStatus": 202,
+    "applicationJobId": "aws_a7_one_20260725t183304z",
+    "correlationId": "corr_3f1a2cec6eb04b2392532ae5e13e53d4",
+    "provider": "AWS_BATCH",
+    "providerAttempt": 1,
+    "providerJobArn": "arn:aws:batch:eu-north-1:154959837939:job/44d5d030-b405-4bf9-b655-71b464cb56da",
+    "providerJobId": "44d5d030-b405-4bf9-b655-71b464cb56da",
+    "schemaVersion": 1,
+    "status": "SUBMITTED"
+  },
+  "idempotencyResult": "PASS_SAME_PROVIDER_JOB_ID",
+  "credentialsRecorded": false
+}

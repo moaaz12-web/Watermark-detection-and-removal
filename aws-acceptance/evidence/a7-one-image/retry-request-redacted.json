@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "applicationJobId": "aws_a7_retry_20260725t221122z",
+  "manifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_retry_20260725t221122z/input-manifest.json",
+  "manifestGeneration": "1785017602337557",
+  "outputManifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_retry_20260725t221122z/output-manifest.json",
+  "pipelineVersion": "watermark-v1",
+  "requestSha256": "54fee19e0507c0cb34ff58e18db2033f27a2dc21f04e419e32f0d00f7e5a764c"
+}

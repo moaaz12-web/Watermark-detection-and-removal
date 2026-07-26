@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "jobId": "aws_a7_one_20260725t183304z",
+  "tenantId": "gpu_acceptance",
+  "pipelineVersion": "watermark-v1",
+  "createdAt": "2026-07-25T18:33:04Z",
+  "items": [
+    {
+      "itemId": "asset_1",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_one_20260725t183304z/asset_1.png",
+      "inputGeneration": "1785004390776455",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_one_20260725t183304z/asset_1/",
+      "sourceChecksumSha256": "512a7ee56b4e32548c4342721e244af16784a2e3c52f951f08358b713882ef5b"
+    }
+  ]
+}

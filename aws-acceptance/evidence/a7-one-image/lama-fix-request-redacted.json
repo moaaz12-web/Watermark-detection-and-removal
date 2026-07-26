@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "applicationJobId": "aws_a7_lama_fix_20260726t095002z",
+  "manifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_lama_fix_20260726t095002z/input-manifest.json",
+  "manifestGeneration": "1785059458136501",
+  "outputManifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_lama_fix_20260726t095002z/output-manifest.json",
+  "pipelineVersion": "watermark-v1",
+  "requestSha256": "0ca2d59a841920e08a5eced8a703281bec5edc8af85deff1c4b5015b48d1f8bb"
+}

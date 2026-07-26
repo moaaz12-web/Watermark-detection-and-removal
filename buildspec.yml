@@ -1,0 +1,37 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - test "${IMAGE_TAG}" != "UNSET"
+      - printf '%s' "${IMAGE_TAG}" | grep -Eq '^[a-z0-9][a-z0-9._-]{0,127}$'
+      - REGISTRY_HOST="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+      - aws ecr get-login-password --region "${AWS_DEFAULT_REGION}" | docker login --username AWS --password-stdin "${REGISTRY_HOST}"
+      - docker buildx create --name watermark-remote-builder --driver docker-container --use
+  build:
+    commands:
+      - >-
+        docker buildx build
+        --platform linux/amd64
+        --cache-from "type=registry,ref=${CACHE_REPOSITORY_URI}:buildcache"
+        --cache-to "type=registry,ref=${CACHE_REPOSITORY_URI}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true"
+        --build-arg "GPU_BASE_IMAGE=${GPU_BASE_IMAGE}"
+        --file Dockerfile.gpu
+        --tag "${WORKER_REPOSITORY_URI}:${IMAGE_TAG}"
+        --load
+        .
+      - >-
+        docker run --rm
+        --entrypoint python
+        "${WORKER_REPOSITORY_URI}:${IMAGE_TAG}"
+        -c "import torch; import saicinpainting.evaluation"
+  post_build:
+    commands:
+      - docker push "${WORKER_REPOSITORY_URI}:${IMAGE_TAG}"
+      - >-
+        IMAGE_DIGEST="$(aws ecr describe-images
+        --repository-name "${WORKER_REPOSITORY_URI##*/}"
+        --image-ids "imageTag=${IMAGE_TAG}"
+        --query 'imageDetails[0].imageDigest'
+        --output text)"
+      - printf 'Pushed immutable image %s@%s\n' "${WORKER_REPOSITORY_URI}" "${IMAGE_DIGEST}"

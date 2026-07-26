@@ -21,7 +21,7 @@ def test_a5_creates_one_constrained_private_ecr_repository_without_vulnerability
     text = terraform_text()
     compact = compact_terraform_text()
 
-    assert text.count('resource "aws_ecr_repository"') == 1
+    assert text.count('resource "aws_ecr_repository"') == 2
     assert 'name="${local.name_prefix}-worker"' in compact
     assert 'image_tag_mutability="IMMUTABLE"' in compact
     assert 'scan_on_push=false' in compact
@@ -35,7 +35,7 @@ def test_a5_lifecycle_can_expire_only_old_untagged_images() -> None:
     text = terraform_text()
     compact = compact_terraform_text()
 
-    assert text.count('resource "aws_ecr_lifecycle_policy"') == 1
+    assert text.count('resource "aws_ecr_lifecycle_policy"') == 2
     assert 'tagStatus="untagged"' in compact
     assert 'countType="sinceImagePushed"' in compact
     assert 'countUnit="days"' in compact

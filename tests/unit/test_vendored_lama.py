@@ -50,6 +50,20 @@ def test_vendored_lama_predict_only_import_does_not_load_training_data() -> None
     assert "saicinpainting.training.losses.perceptual" not in top_level_imports
 
 
+def test_vendored_lama_inference_utils_do_not_import_training_evaluators() -> None:
+    module = ast.parse((LAMA_ROOT / "evaluation" / "__init__.py").read_text())
+    top_level_imports: set[str] = set()
+    for node in module.body:
+        if isinstance(node, ast.Import):
+            top_level_imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            top_level_imports.add(node.module)
+
+    assert "torch" not in top_level_imports
+    assert "saicinpainting.evaluation.evaluator" not in top_level_imports
+    assert "saicinpainting.evaluation.losses.base_loss" not in top_level_imports
+
+
 def test_vendored_lama_is_included_in_the_worker_wheel() -> None:
     pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
 

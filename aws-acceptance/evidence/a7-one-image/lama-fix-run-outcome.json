@@ -1,0 +1,61 @@
+{
+  "recordedDate": "2026-07-26",
+  "applicationJobId": "aws_a7_lama_fix_20260726t095002z",
+  "providerJobId": "0f660e5f-580c-452a-8af7-7540f84b9d3d",
+  "providerJobArn": "arn:aws:batch:eu-north-1:154959837939:job/0f660e5f-580c-452a-8af7-7540f84b9d3d",
+  "batchJobDefinition": "watermark-staging-worker:3",
+  "workerImageDigest": "sha256:596493d0665a053a52861ad0b3b585700c2f329238d01ae4a5583e82c656d95d",
+  "batchStatus": "SUCCEEDED",
+  "containerExitCode": 0,
+  "containerStartedAt": "2026-07-26T10:01:41.065Z",
+  "containerStoppedAt": "2026-07-26T10:05:31.592Z",
+  "containerRuntimeSeconds": 230.527,
+  "instance": {
+    "instanceId": "i-0c5087dea65c169de",
+    "instanceType": "g4dn.xlarge",
+    "launchedAt": "2026-07-26T09:57:40Z",
+    "terminatedAt": "2026-07-26T10:06:00Z",
+    "billableEstimateSeconds": 500,
+    "finalState": "terminated"
+  },
+  "gpu": {
+    "deviceName": "Tesla T4",
+    "cudaCapability": "7.5",
+    "torchVersion": "2.5.1+cu121"
+  },
+  "result": {
+    "counts": {
+      "total": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "blocked": 0,
+      "skipped": 0
+    },
+    "decision": "INPAINTED",
+    "outputManifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_lama_fix_20260726t095002z/output-manifest.json",
+    "completionMarkerUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_lama_fix_20260726t095002z/_COMPLETE.json",
+    "finalImageUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_lama_fix_20260726t095002z/asset_1/inpainted/final.png"
+  },
+  "estimatedAwsRuntimeCostUsd": {
+    "compute": 0.0775,
+    "publicIpv4": 0.000694,
+    "gp3": 0.003181,
+    "total": 0.081375,
+    "note": "Deterministic estimate using the rates observed for the earlier same-day A7 run; Cost Explorer posting is delayed."
+  },
+  "cleanup": {
+    "submissionEnabled": false,
+    "queueState": "DISABLED",
+    "desiredVcpus": 0,
+    "activeBatchJobs": 0,
+    "activeEc2Instances": 0,
+    "ebsVolumes": 0,
+    "ecsContainerInstances": 0,
+    "ecsRunningTasks": 0,
+    "activeSpotRequests": 0,
+    "natGateways": 0,
+    "elasticIps": 0,
+    "loadBalancers": 0,
+    "terraformChangesAfterCleanup": 0
+  }
+}

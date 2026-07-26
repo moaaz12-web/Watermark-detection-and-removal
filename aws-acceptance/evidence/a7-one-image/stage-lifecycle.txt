@@ -1,0 +1,26 @@
+A7 stage lifecycle
+
+2026-07-25T20:47:41.099244Z job_started
+2026-07-25T20:47:44.010865Z gpu_acceptance_started
+  device=Tesla T4
+  cudaCapability=7.5
+  torchVersion=2.5.1+cu121
+
+2026-07-25T20:50:44.232807Z background_removal released
+  durationSeconds=0.000004814000021724496
+  cudaMemoryAllocatedBytes=0
+  cudaMemoryReservedBytes=0
+  cudaPeakMemoryAllocatedBytes=0
+  cudaPeakMemoryReservedBytes=0
+  peakSystemRamBytes=473116672
+  localDiskUsedBytes=27832803328
+  localDiskFreeBytes=186835849216
+
+2026-07-25T20:50:44.232969Z worker_failed
+  errorCode=UNEXPECTED_FATAL
+
+CloudWatch warning immediately before failure:
+There was a problem when trying to write in the Hugging Face cache folder
+(/home/watermark-worker/.cache/huggingface/hub).
+
+No detection or inpainting stage started. No automatic retry occurred.

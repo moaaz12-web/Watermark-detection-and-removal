@@ -87,3 +87,18 @@ output "batch_image_ready" {
   description = "Whether a valid A5 digest was supplied to create the job definition and Lambda Batch permissions."
   value       = local.batch_image_ready
 }
+
+output "codebuild_worker_image_project_name" {
+  description = "Idle on-demand CodeBuild project used to build and push worker images."
+  value       = aws_codebuild_project.worker_image.name
+}
+
+output "codebuild_source_bucket_name" {
+  description = "Private short-lived source ZIP bucket for remote worker-image builds."
+  value       = aws_s3_bucket.codebuild_source.bucket
+}
+
+output "ecr_worker_build_cache_repository_url" {
+  description = "Mutable BuildKit registry-cache repository; it does not contain release tags."
+  value       = aws_ecr_repository.worker_build_cache.repository_url
+}

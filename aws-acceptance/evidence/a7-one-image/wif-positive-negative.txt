@@ -1,0 +1,19 @@
+A7 live WIF evidence
+
+Positive read path:
+- The Batch task used job role watermark-staging-gpu-job-role.
+- No service-account key or long-lived Google credential was injected.
+- The worker read and validated the pinned GCS input manifest before emitting job_started.
+- It read the source image and materialized the selected checksum-pinned GCS model artifacts
+  before reaching background_removal initialization.
+- Therefore the live AWS task-role to Google WIF read path passed.
+
+Positive write path:
+- Not reached. The background-removal runtime failed before the first item checkpoint.
+- No result object, conditional create, or completion marker was written.
+
+Negative scope:
+- The exact A4 conditional IAM bindings and negative-scope tests remain valid.
+- No dedicated unrelated-prefix live probe was added to the immutable A5 image.
+
+Overall: PARTIAL. Live keyless reads passed; live conditional result write remains unproven.

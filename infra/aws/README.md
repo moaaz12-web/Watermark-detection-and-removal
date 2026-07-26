@@ -6,7 +6,10 @@ the authenticated HTTP API, submission Lambda, DynamoDB idempotency ledger, logs
 dedicated GCP orchestrator, empty-permission AWS GPU job role, Google AWS workload identity
 provider, prefix-conditioned worker GCS permissions, immutable ECR repository, dedicated public
 Batch network, runtime roles, launch template, managed compute environment, disabled queue, and
-digest-gated job definition.
+digest-gated job definition. It also provisions an idle, on-demand CodeBuild project that builds
+worker images inside AWS from a small operator-uploaded source ZIP. BuildKit stores reusable layers
+in a separate mutable ECR cache repository; reviewed release tags remain in the immutable worker
+repository.
 
 It intentionally creates no direct EC2 instance, GPU, NAT gateway, Elastic IP, load balancer, SSH
 key, or standalone EBS volume. The managed compute environment has `min_vcpus=0`,
@@ -14,6 +17,12 @@ key, or standalone EBS volume. The managed compute environment has `min_vcpus=0`
 switch both default to disabled. An empty `worker_image_digest` prevents creation of the job
 definition and prevents Lambda from receiving Batch permissions. Supplying a digest prepares the
 immutable job revision but does not submit a job or launch an instance.
+
+Terraform does not start a CodeBuild build. The CodeBuild project, private short-lived S3 source
+bucket, ECR cache repository, IAM role, and CloudWatch log group remain idle until the operator
+explicitly runs `scripts/start-worker-image-build.sh IMAGE_TAG`. That helper uploads source code,
+not a multi-gigabyte local image. CodeBuild then performs the large image build and ECR push within
+AWS. It does not start the Batch queue or GPU compute.
 
 The A4 GPU job role remains an identity anchor with no managed or inline policy. The A5 ECR
 lifecycle policy can expire only untagged images older than 30 days; tagged release images are not
@@ -70,10 +79,17 @@ checkpoint; submitting the first billable GPU job belongs to A7.
 
 ## Current staging checkpoint
 
-As of 2026-07-25, A6 is deployed in `eu-north-1`. The compute environment and queue are `VALID`,
+As of 2026-07-26, the foundation is deployed in `eu-north-1`. The compute environment and queue are `VALID`,
 the queue is `DISABLED`, submission is `false`, and job definition
-`watermark-staging-worker:1` references the accepted A5 image digest
-`sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218`.
+`watermark-staging-worker:3` references the remotely built LaMa import-fix image digest
+`sha256:596493d0665a053a52861ad0b3b585700c2f329238d01ae4a5583e82c656d95d`.
+Revision 3 retains the writable Hugging Face and Transformers cache paths from revision 2.
 The post-apply Terraform plan reports no changes. Live checks found zero jobs, EC2 instances, EBS
 volumes, ECS container instances/tasks, Spot requests, NAT gateways, Elastic IPs, and load
 balancers. Redacted evidence is in `aws-acceptance/evidence/a6-foundation/`.
+
+A7 one-image acceptance completed successfully on revision 3 on 2026-07-26. The GPU worker
+processed one PNG through background removal, detection, and LaMa inpainting, wrote its final image
+and completion manifests to GCS, exited `0`, and automatically terminated its one `g4dn.xlarge`.
+The queue and submission gate were then returned to their disabled defaults. Final evidence is in
+`aws-acceptance/evidence/a7-one-image/lama-fix-run-outcome.json`.

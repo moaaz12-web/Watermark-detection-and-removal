@@ -203,6 +203,20 @@ variable "worker_image_digest" {
   }
 }
 
+variable "gpu_base_image" {
+  description = "Reviewed Linux AMD64 CUDA/PyTorch base image pinned by digest for remote worker builds."
+  type        = string
+  default     = "docker.io/pytorch/pytorch:2.5.1-cuda12.1-cudnn9-runtime@sha256:831247999fbf7e08f61b3e39f6d77ee434f38f6f07f769d00db451e853878067"
+
+  validation {
+    condition = can(regex(
+      "^docker\\.io/pytorch/pytorch:[a-zA-Z0-9._-]+@sha256:[0-9a-f]{64}$",
+      var.gpu_base_image,
+    ))
+    error_message = "gpu_base_image must be the reviewed Docker Hub PyTorch image pinned by sha256 digest."
+  }
+}
+
 variable "ledger_ttl_seconds" {
   description = "Submission-ledger retention period."
   type        = number

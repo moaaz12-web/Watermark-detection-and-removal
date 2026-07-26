@@ -1,0 +1,26 @@
+{
+  "instance": {
+    "instanceId": "i-0f39b5f6395c2ca6e",
+    "instanceType": "g4dn.xlarge",
+    "amiId": "ami-0965bebce0437f0fd",
+    "launchTime": "2026-07-25T20:44:04Z",
+    "terminationInitiatedTime": "2026-07-25T20:51:21Z",
+    "billableEstimateSeconds": 437,
+    "publicIpv4Assigned": true
+  },
+  "storage": {
+    "volumeId": "vol-0f28e7ea365d812a9",
+    "volumeType": "gp3",
+    "sizeGiB": 200,
+    "deleteOnTermination": true,
+    "deleted": true
+  },
+  "container": {
+    "runtimeSeconds": 200.996,
+    "peakSystemRamBytes": 473116672,
+    "cudaPeakMemoryAllocatedBytes": 0,
+    "cudaPeakMemoryReservedBytes": 0,
+    "localDiskUsedBytes": 27832803328,
+    "localDiskFreeBytes": 186835849216
+  }
+}

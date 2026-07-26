@@ -146,6 +146,16 @@ def handle_event(
             correlation_id,
         )
     except SubmissionFailed:
+        LOGGER.exception(
+            json.dumps(
+                {
+                    "event": "provider_submission_failed",
+                    "correlationId": correlation_id,
+                    "routeKey": route_key,
+                },
+                sort_keys=True,
+            )
+        )
         return _error_response(
             502,
             SubmissionErrorCode.PROVIDER_RETRYABLE,

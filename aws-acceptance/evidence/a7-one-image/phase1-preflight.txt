@@ -1,0 +1,78 @@
+A7 Phase 1 non-billable preflight
+Recorded: 2026-07-25
+AWS account: 154959837939
+AWS region: eu-north-1
+GCP project: project-5909a738-2fdc-451e-ad6
+
+AWS launch prerequisites:
+- Account plan: PAID, ACTIVE
+- Running On-Demand G and VT quota: 4 vCPUs
+- Compute environment: VALID, desired=0, max=4, g4dn.xlarge only
+- Queue: VALID, DISABLED
+- Submission Lambda: SUBMISSION_ENABLED=false
+- Active Batch jobs: 0
+- EC2 instances: 0
+- EBS volumes: 0
+- Monthly budget: USD 60
+- Budget actual spend at preflight: USD 0
+- Job definition: watermark-staging-worker:1
+- Attempts: 1
+- Timeout: 5400 seconds
+- Image digest:
+  sha256:caa1f348edd423b6f64c1fbb0c7a9bdc46e6106c4da29d97bedfd363507aa218
+
+Selected input:
+- Local file: images/image copy 4.png
+- Content: composite Lamborghini-key pipeline result sheet
+- Dimensions: 1206x155 PNG
+- Bytes: 105906
+- SHA-256:
+  512a7ee56b4e32548c4342721e244af16784a2e3c52f951f08358b713882ef5b
+- The full file is used without cropping or editing.
+- This run evaluates system behavior, not visual quality.
+
+Pinned GCS input:
+- URI:
+  gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_one_20260725t183304z/asset_1.png
+- Generation: 1785004390776455
+- Remote SHA-256 matched the local SHA-256.
+
+Pinned GCS manifest:
+- URI:
+  gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a7_one_20260725t183304z/input-manifest.json
+- Generation: 1785004452804054
+- SHA-256:
+  d279d94747e9a117b4b746144b3bcde0a19d6cdc21a83c375bbdad18c0b35c9e
+- Pydantic InputManifest validation passed with exactly one item.
+- The item output prefix and job output-manifest object were empty/nonexistent.
+
+Canonical submission request:
+- Application job ID: aws_a7_one_20260725t183304z
+- Pipeline: watermark-v1
+- Request SHA-256:
+  6e535451e9739da7b5e17e6d71e4538008d70b584ecdc0ff35d4f7cbf9948e6c
+- SubmitRequest validation, prefix policy, and canonical-hash verification passed.
+
+Current pricing from the live AWS Price List:
+- On-Demand Linux g4dn.xlarge: USD 0.558 per hour
+- gp3 storage: USD 0.0836 per GB-month
+- In-use public IPv4: USD 0.005 per hour
+- Deterministic 90-minute estimate:
+  - EC2: USD 0.8370
+  - 200 GB gp3: USD 0.0344
+  - public IPv4: USD 0.0075
+  - total before logs/data transfer: USD 0.8789
+
+Authentication preflight:
+- After explicit operator approval, user:moaaz7151@gmail.com received
+  roles/iam.serviceAccountTokenCreator on only watermark-aws-orchestrator.
+- A temporary Google ID token with the exact staging audience was held only in process memory.
+- The authenticated nonexistent-job GET returned HTTP 404 with AWS_GPU_NOT_FOUND.
+- The token was not printed, logged, or stored.
+- No DynamoDB item or Batch job was created.
+
+Safety closure:
+- The enable-only Terraform plan was not applied.
+- Local staging flags were restored to false.
+- The final disabled-state Terraform plan reported no changes.
+- No Batch job or GPU was launched.

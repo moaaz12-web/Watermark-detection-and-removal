@@ -8,6 +8,14 @@ locals {
   batch_compute_name  = "${local.name_prefix}-gpu"
   batch_queue_name    = "${local.name_prefix}-gpu"
   batch_job_name      = "${local.name_prefix}-worker"
+  codebuild_name      = "${local.name_prefix}-worker-image-build"
+  codebuild_log_group = "/aws/codebuild/${local.codebuild_name}"
+  codebuild_source_bucket_name = join("-", [
+    local.name_prefix,
+    "codebuild-source",
+    var.aws_account_id,
+  ])
+  ecr_cache_repository_name = "${local.name_prefix}-worker-build-cache"
 
   lambda_source_dir = "${path.module}/../../services/aws_submission/build/lambda"
   lambda_zip_path   = "${path.module}/../../services/aws_submission/dist/submission-lambda.zip"

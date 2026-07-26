@@ -30,6 +30,10 @@ ENV HOME=/home/watermark-worker \
     PYTHONUNBUFFERED=1 \
     TMPDIR=/tmp/watermark-worker \
     WM_MODEL_WORK_ROOT=/tmp/watermark-worker/models \
+    HF_HOME=/tmp/watermark-worker/huggingface \
+    TRANSFORMERS_CACHE=/tmp/watermark-worker/huggingface/transformers \
+    HUGGINGFACE_HUB_CACHE=/tmp/watermark-worker/huggingface/hub \
+    XDG_CACHE_HOME=/tmp/watermark-worker/cache \
     YOLO_CONFIG_DIR=/tmp/watermark-worker \
     SAM2_BUILD_CUDA=0
 
