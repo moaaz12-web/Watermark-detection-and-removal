@@ -4,8 +4,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from aws_submission.batch_adapter import AwsBatchAdapter
-from aws_submission.models import SubmitRequest
+import pytest
+
+from aws_submission.batch_adapter import (
+    AwsBatchAdapter,
+    ProviderJobIdentityMismatch,
+    ProviderJobMissing,
+)
+from aws_submission.models import ProviderStatus, SubmitRequest
 
 FIXTURE = Path(__file__).parents[3] / "contracts" / "aws-gpu-v1" / "submit-request.json"
 
@@ -13,6 +19,7 @@ FIXTURE = Path(__file__).parents[3] / "contracts" / "aws-gpu-v1" / "submit-reque
 class RecordingBatchClient:
     def __init__(self) -> None:
         self.submission: dict[str, Any] | None = None
+        self.status = "SUCCEEDED"
 
     def submit_job(self, **kwargs: Any) -> dict[str, str]:
         self.submission = kwargs
@@ -22,6 +29,35 @@ class RecordingBatchClient:
                 "arn:aws:batch:eu-north-1:154959837939:job/"
                 "00000000-0000-0000-0000-000000000001"
             ),
+        }
+
+    def describe_jobs(self, **kwargs: Any) -> dict[str, Any]:
+        job_id = kwargs["jobs"][0]
+        return {
+            "jobs": [
+                {
+                    "jobId": job_id,
+                    "jobArn": f"arn:aws:batch:eu-north-1:154959837939:job/{job_id}",
+                    "jobName": "watermark-wm_123",
+                    "jobQueue": (
+                        "arn:aws:batch:eu-north-1:154959837939:"
+                        "job-queue/watermark-staging-gpu"
+                    ),
+                    "jobDefinition": (
+                        "arn:aws:batch:eu-north-1:154959837939:"
+                        "job-definition/watermark-staging-worker:3"
+                    ),
+                    "status": self.status,
+                    "createdAt": 1_725_700_000_000,
+                    "startedAt": 1_725_700_060_000,
+                    "stoppedAt": 1_725_700_120_000,
+                    "tags": {
+                        "applicationJobId": "wm_123",
+                        "requestSha256": "f" * 64,
+                        "managedBy": "watermark-submission",
+                    },
+                }
+            ]
         }
 
 
@@ -52,3 +88,103 @@ def test_submit_uses_only_fixed_queue_definition_and_allowlisted_parameters() ->
     }
     assert "containerOverrides" not in client.submission
 
+
+@pytest.mark.parametrize(
+    ("aws_status", "expected_status"),
+    [
+        ("SUBMITTED", ProviderStatus.SUBMITTED),
+        ("PENDING", ProviderStatus.PENDING),
+        ("RUNNABLE", ProviderStatus.RUNNABLE),
+        ("STARTING", ProviderStatus.STARTING),
+        ("RUNNING", ProviderStatus.RUNNING),
+        ("SUCCEEDED", ProviderStatus.SUCCEEDED),
+        ("FAILED", ProviderStatus.FAILED),
+    ],
+)
+def test_describe_verifies_identity_and_maps_every_batch_status(
+    aws_status: str,
+    expected_status: ProviderStatus,
+) -> None:
+    client = RecordingBatchClient()
+    client.status = aws_status
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arn=(
+            "arn:aws:batch:eu-north-1:154959837939:"
+            "job-definition/watermark-staging-worker:3"
+        ),
+    )
+
+    result = adapter.describe(
+        "00000000-0000-0000-0000-000000000001",
+        expected_provider_job_arn=(
+            "arn:aws:batch:eu-north-1:154959837939:"
+            "job/00000000-0000-0000-0000-000000000001"
+        ),
+        expected_job_name="watermark-wm_123",
+        expected_application_job_id="wm_123",
+        expected_request_sha256="f" * 64,
+    )
+
+    assert result.status is expected_status
+    assert result.submitted_at.isoformat() == "2024-09-07T09:06:40+00:00"
+    assert result.started_at is not None
+    assert result.stopped_at is not None
+
+
+def test_describe_rejects_missing_provider_job() -> None:
+    client = RecordingBatchClient()
+    client.describe_jobs = lambda **kwargs: {"jobs": []}  # type: ignore[method-assign]
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arn=(
+            "arn:aws:batch:eu-north-1:154959837939:"
+            "job-definition/watermark-staging-worker:3"
+        ),
+    )
+
+    with pytest.raises(ProviderJobMissing):
+        adapter.describe(
+            "00000000-0000-0000-0000-000000000001",
+            expected_provider_job_arn=(
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job/00000000-0000-0000-0000-000000000001"
+            ),
+            expected_job_name="watermark-wm_123",
+            expected_application_job_id="wm_123",
+            expected_request_sha256="f" * 64,
+        )
+
+
+def test_describe_rejects_job_outside_reserved_identity() -> None:
+    client = RecordingBatchClient()
+    original_describe = client.describe_jobs
+
+    def wrong_queue(**kwargs: Any) -> dict[str, Any]:
+        response = original_describe(**kwargs)
+        response["jobs"][0]["jobQueue"] = "arn:aws:batch:eu-north-1:154959837939:job-queue/other"
+        return response
+
+    client.describe_jobs = wrong_queue  # type: ignore[method-assign]
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arn=(
+            "arn:aws:batch:eu-north-1:154959837939:"
+            "job-definition/watermark-staging-worker:3"
+        ),
+    )
+
+    with pytest.raises(ProviderJobIdentityMismatch):
+        adapter.describe(
+            "00000000-0000-0000-0000-000000000001",
+            expected_provider_job_arn=(
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job/00000000-0000-0000-0000-000000000001"
+            ),
+            expected_job_name="watermark-wm_123",
+            expected_application_job_id="wm_123",
+            expected_request_sha256="f" * 64,
+        )

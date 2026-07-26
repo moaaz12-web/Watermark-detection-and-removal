@@ -6,6 +6,9 @@ from typing import Protocol
 
 from .batch_adapter import (
     ProviderJob,
+    ProviderJobIdentityMismatch,
+    ProviderJobMissing,
+    ProviderJobStatus,
     ProviderSubmissionRejected,
     ProviderSubmissionUncertain,
 )
@@ -37,6 +40,14 @@ class SubmissionFailed(Exception):
 
 
 class SubmissionNotFound(Exception):
+    pass
+
+
+class SubmissionProviderStateMissing(Exception):
+    pass
+
+
+class SubmissionProviderIdentityMismatch(Exception):
     pass
 
 
@@ -75,6 +86,16 @@ class BatchGateway(Protocol):
         deterministic_job_name: str,
         request_sha256: str,
     ) -> list[ProviderJob]: ...
+
+    def describe(
+        self,
+        provider_job_id: str,
+        *,
+        expected_provider_job_arn: str,
+        expected_job_name: str,
+        expected_application_job_id: str,
+        expected_request_sha256: str,
+    ) -> ProviderJobStatus: ...
 
     def terminate(self, provider_job_id: str, reason: str) -> None: ...
 
@@ -134,18 +155,21 @@ class SubmissionService:
         record = self._ledger.get(application_job_id)
         if record is None:
             raise SubmissionNotFound
-        return _status_response(record)
+        return self._provider_status(record)
 
     def cancel(self, application_job_id: str, reason_code: str) -> StatusResponse:
         record = self._ledger.get(application_job_id)
         if record is None:
             raise SubmissionNotFound
-        if record.state in {LedgerState.CANCELLATION_REQUESTED, LedgerState.CANCELLED}:
+        if record.state is LedgerState.CANCELLED:
             return _status_response(record)
-        if record.provider_job_id is None:
-            raise SubmissionUncertain
+        snapshot = self._describe_provider(record)
+        if snapshot.status in {ProviderStatus.SUCCEEDED, ProviderStatus.FAILED}:
+            return self._provider_status(record, snapshot=snapshot)
+        if record.state is LedgerState.CANCELLATION_REQUESTED:
+            return self._provider_status(record, snapshot=snapshot)
         try:
-            self._batch.terminate(record.provider_job_id, reason_code)
+            self._batch.terminate(snapshot.provider_job_id, reason_code)
             updated = self._ledger.transition(
                 record.application_job_id,
                 record.request_sha256,
@@ -158,6 +182,71 @@ class SubmissionService:
         except ProviderSubmissionRejected as exc:
             raise SubmissionFailed from exc
         return _status_response(updated)
+
+    def _provider_status(
+        self,
+        record: LedgerRecord,
+        *,
+        snapshot: ProviderJobStatus | None = None,
+    ) -> StatusResponse:
+        if record.provider_job_id is None or record.provider_job_arn is None:
+            return _status_response(record)
+        current = snapshot or self._describe_provider(record)
+        status = current.status
+        reason_code = "AWS_BATCH_FAILED" if status is ProviderStatus.FAILED else None
+        if record.state is LedgerState.CANCELLED:
+            status = ProviderStatus.CANCELLED
+            reason_code = record.reason_code
+        elif record.state is LedgerState.CANCELLATION_REQUESTED:
+            reason_code = record.reason_code
+            if status is ProviderStatus.FAILED:
+                try:
+                    record = self._ledger.transition(
+                        record.application_job_id,
+                        record.request_sha256,
+                        frozenset({LedgerState.CANCELLATION_REQUESTED}),
+                        LedgerState.CANCELLED,
+                        reason_code=record.reason_code,
+                    )
+                except LedgerConcurrencyError as exc:
+                    latest = self._ledger.get(record.application_job_id)
+                    if latest is None or latest.state is not LedgerState.CANCELLED:
+                        raise SubmissionUncertain from exc
+                    record = latest
+                status = ProviderStatus.CANCELLED
+            elif status is not ProviderStatus.SUCCEEDED:
+                status = ProviderStatus.CANCELLATION_REQUESTED
+        return StatusResponse(
+            schema_version=1,
+            application_job_id=record.application_job_id,
+            provider=ComputeProvider.AWS_BATCH,
+            provider_job_id=current.provider_job_id,
+            provider_job_arn=current.provider_job_arn,
+            status=status,
+            provider_attempt=record.provider_attempt,
+            submitted_at=current.submitted_at,
+            started_at=current.started_at,
+            stopped_at=current.stopped_at,
+            reason_code=reason_code,
+        )
+
+    def _describe_provider(self, record: LedgerRecord) -> ProviderJobStatus:
+        if record.provider_job_id is None or record.provider_job_arn is None:
+            raise SubmissionUncertain
+        try:
+            return self._batch.describe(
+                record.provider_job_id,
+                expected_provider_job_arn=record.provider_job_arn,
+                expected_job_name=_deterministic_job_name(record.application_job_id),
+                expected_application_job_id=record.application_job_id,
+                expected_request_sha256=record.request_sha256,
+            )
+        except ProviderJobMissing as exc:
+            raise SubmissionProviderStateMissing from exc
+        except ProviderJobIdentityMismatch as exc:
+            raise SubmissionProviderIdentityMismatch from exc
+        except ProviderSubmissionUncertain as exc:
+            raise SubmissionUncertain from exc
 
     def _submit_reserved(
         self,
@@ -276,6 +365,8 @@ __all__ = [
     "SubmissionDisabled",
     "SubmissionFailed",
     "SubmissionNotFound",
+    "SubmissionProviderIdentityMismatch",
+    "SubmissionProviderStateMissing",
     "SubmissionService",
     "SubmissionUncertain",
 ]

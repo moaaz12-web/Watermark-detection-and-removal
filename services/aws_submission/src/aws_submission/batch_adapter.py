@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from botocore.exceptions import BotoCoreError, ClientError
 
-from .models import SubmitRequest
+from .models import ProviderStatus, SubmitRequest
 
 
 class ProviderSubmissionUncertain(Exception):
@@ -16,10 +17,28 @@ class ProviderSubmissionRejected(Exception):
     """AWS definitively rejected the request before creating a job."""
 
 
+class ProviderJobMissing(Exception):
+    """The reserved AWS Batch job is no longer visible to DescribeJobs."""
+
+
+class ProviderJobIdentityMismatch(Exception):
+    """The described AWS Batch job does not match the immutable reservation."""
+
+
 @dataclass(frozen=True)
 class ProviderJob:
     provider_job_id: str
     provider_job_arn: str
+
+
+@dataclass(frozen=True)
+class ProviderJobStatus:
+    provider_job_id: str
+    provider_job_arn: str
+    status: ProviderStatus
+    submitted_at: datetime
+    started_at: datetime | None
+    stopped_at: datetime | None
 
 
 class AwsBatchAdapter:
@@ -128,6 +147,67 @@ class AwsBatchAdapter:
                     matches.append(ProviderJob(provider_job_id=job_id, provider_job_arn=job_arn))
         return matches
 
+    def describe(
+        self,
+        provider_job_id: str,
+        *,
+        expected_provider_job_arn: str,
+        expected_job_name: str,
+        expected_application_job_id: str,
+        expected_request_sha256: str,
+    ) -> ProviderJobStatus:
+        try:
+            response = self._client.describe_jobs(jobs=[provider_job_id])
+        except (BotoCoreError, ClientError) as exc:
+            raise ProviderSubmissionUncertain from exc
+
+        jobs = response.get("jobs", [])
+        if not isinstance(jobs, list) or len(jobs) != 1:
+            raise ProviderJobMissing
+        job = jobs[0]
+        if not isinstance(job, dict):
+            raise ProviderJobIdentityMismatch
+
+        expected_identity = {
+            "jobId": provider_job_id,
+            "jobArn": expected_provider_job_arn,
+            "jobName": expected_job_name,
+            "jobQueue": self._queue_arn,
+            "jobDefinition": self._job_definition_arn,
+        }
+        if any(job.get(key) != value for key, value in expected_identity.items()):
+            raise ProviderJobIdentityMismatch
+
+        tags = job.get("tags")
+        expected_tags = {
+            "applicationJobId": expected_application_job_id,
+            "requestSha256": expected_request_sha256,
+            "managedBy": "watermark-submission",
+        }
+        if not isinstance(tags, dict) or any(
+            tags.get(key) != value for key, value in expected_tags.items()
+        ):
+            raise ProviderJobIdentityMismatch
+
+        try:
+            status = ProviderStatus(str(job["status"]))
+            submitted_at = _timestamp(job["createdAt"])
+            started_at = _optional_timestamp(job.get("startedAt"))
+            stopped_at = _optional_timestamp(job.get("stoppedAt"))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProviderJobIdentityMismatch from exc
+        if status not in _AWS_BATCH_STATUSES:
+            raise ProviderJobIdentityMismatch
+
+        return ProviderJobStatus(
+            provider_job_id=provider_job_id,
+            provider_job_arn=expected_provider_job_arn,
+            status=status,
+            submitted_at=submitted_at,
+            started_at=started_at,
+            stopped_at=stopped_at,
+        )
+
     def terminate(self, provider_job_id: str, reason: str) -> None:
         try:
             self._client.terminate_job(jobId=provider_job_id, reason=reason[:512])
@@ -135,3 +215,26 @@ class AwsBatchAdapter:
             raise ProviderSubmissionRejected from exc
         except BotoCoreError as exc:
             raise ProviderSubmissionUncertain from exc
+
+
+_AWS_BATCH_STATUSES = frozenset(
+    {
+        ProviderStatus.SUBMITTED,
+        ProviderStatus.PENDING,
+        ProviderStatus.RUNNABLE,
+        ProviderStatus.STARTING,
+        ProviderStatus.RUNNING,
+        ProviderStatus.SUCCEEDED,
+        ProviderStatus.FAILED,
+    }
+)
+
+
+def _timestamp(value: object) -> datetime:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise ValueError("AWS Batch timestamp must be a positive integer")
+    return datetime.fromtimestamp(value / 1000, UTC)
+
+
+def _optional_timestamp(value: object) -> datetime | None:
+    return None if value is None else _timestamp(value)

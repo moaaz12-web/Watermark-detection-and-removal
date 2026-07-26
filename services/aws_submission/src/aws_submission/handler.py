@@ -22,6 +22,8 @@ from .service import (
     SubmissionDisabled,
     SubmissionFailed,
     SubmissionNotFound,
+    SubmissionProviderIdentityMismatch,
+    SubmissionProviderStateMissing,
     SubmissionService,
     SubmissionUncertain,
 )
@@ -134,6 +136,22 @@ def handle_event(
             404,
             SubmissionErrorCode.NOT_FOUND,
             "The application job does not exist in the AWS submission ledger.",
+            False,
+            correlation_id,
+        )
+    except SubmissionProviderStateMissing:
+        return _error_response(
+            503,
+            SubmissionErrorCode.PROVIDER_STATE_MISSING,
+            "The reserved provider job is temporarily unavailable.",
+            True,
+            correlation_id,
+        )
+    except SubmissionProviderIdentityMismatch:
+        return _error_response(
+            502,
+            SubmissionErrorCode.PROVIDER_IDENTITY_MISMATCH,
+            "The provider job does not match the immutable reservation.",
             False,
             correlation_id,
         )

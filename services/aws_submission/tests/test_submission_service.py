@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from aws_submission.batch_adapter import (
+    ProviderJobMissing,
+    ProviderJobStatus,
+)
 from aws_submission.canonical import (
     SubmissionPolicy,
     canonical_request_hash,
 )
 from aws_submission.ledger import LedgerRecord, LedgerState, Reservation
-from aws_submission.models import SubmitRequest
+from aws_submission.models import ProviderStatus, SubmitRequest
 from aws_submission.service import (
     ProviderJob,
     SubmissionConflict,
     SubmissionDisabled,
+    SubmissionProviderStateMissing,
     SubmissionService,
     SubmissionUncertain,
 )
@@ -88,6 +94,20 @@ class FakeBatch:
         self.jobs: list[ProviderJob] = []
         self.raise_uncertain_after_acceptance = False
         self.discovery_override: list[ProviderJob] | None = None
+        self.status = ProviderJobStatus(
+            provider_job_id="00000000-0000-0000-0000-000000000001",
+            provider_job_arn=(
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job/00000000-0000-0000-0000-000000000001"
+            ),
+            status=ProviderStatus.RUNNING,
+            submitted_at=datetime(2026, 7, 26, 11, 8, tzinfo=UTC),
+            started_at=datetime(2026, 7, 26, 11, 13, tzinfo=UTC),
+            stopped_at=None,
+        )
+        self.describe_calls = 0
+        self.terminate_calls = 0
+        self.raise_missing = False
 
     def submit(
         self,
@@ -118,7 +138,25 @@ class FakeBatch:
         return list(self.jobs)
 
     def terminate(self, provider_job_id: str, reason: str) -> None:
-        return None
+        self.terminate_calls += 1
+
+    def describe(
+        self,
+        provider_job_id: str,
+        *,
+        expected_provider_job_arn: str,
+        expected_job_name: str,
+        expected_application_job_id: str,
+        expected_request_sha256: str,
+    ) -> ProviderJobStatus:
+        self.describe_calls += 1
+        if self.raise_missing:
+            raise ProviderJobMissing
+        return replace(
+            self.status,
+            provider_job_id=provider_job_id,
+            provider_job_arn=expected_provider_job_arn,
+        )
 
 
 def request() -> SubmitRequest:
@@ -222,3 +260,93 @@ def test_ambiguous_discovery_never_submits_again() -> None:
         submission.submit("wm_123", request())
 
     assert batch.submit_calls == 1
+
+
+def test_status_describes_reserved_provider_job_and_returns_terminal_timestamps() -> None:
+    ledger = FakeLedger()
+    batch = FakeBatch()
+    submission = service(ledger, batch)
+    submitted = submission.submit("wm_123", request())
+    batch.status = replace(
+        batch.status,
+        provider_job_id=submitted.provider_job_id,
+        provider_job_arn=submitted.provider_job_arn,
+        status=ProviderStatus.SUCCEEDED,
+        stopped_at=datetime(2026, 7, 26, 11, 18, tzinfo=UTC),
+    )
+
+    status = submission.status("wm_123")
+
+    assert status.status is ProviderStatus.SUCCEEDED
+    assert status.submitted_at == datetime(2026, 7, 26, 11, 8, tzinfo=UTC)
+    assert status.started_at == datetime(2026, 7, 26, 11, 13, tzinfo=UTC)
+    assert status.stopped_at == datetime(2026, 7, 26, 11, 18, tzinfo=UTC)
+    assert batch.describe_calls == 1
+
+
+def test_status_returns_stable_missing_provider_error() -> None:
+    ledger = FakeLedger()
+    batch = FakeBatch()
+    submission = service(ledger, batch)
+    submission.submit("wm_123", request())
+    batch.raise_missing = True
+
+    with pytest.raises(SubmissionProviderStateMissing):
+        submission.status("wm_123")
+
+
+def test_terminal_cancellation_does_not_call_terminate_job() -> None:
+    ledger = FakeLedger()
+    batch = FakeBatch()
+    submission = service(ledger, batch)
+    submitted = submission.submit("wm_123", request())
+    batch.status = replace(
+        batch.status,
+        provider_job_id=submitted.provider_job_id,
+        provider_job_arn=submitted.provider_job_arn,
+        status=ProviderStatus.SUCCEEDED,
+        stopped_at=datetime(2026, 7, 26, 11, 18, tzinfo=UTC),
+    )
+
+    first = submission.cancel("wm_123", "USER_REQUESTED")
+    second = submission.cancel("wm_123", "USER_REQUESTED")
+
+    assert first.status is second.status is ProviderStatus.SUCCEEDED
+    assert batch.terminate_calls == 0
+
+
+def test_repeated_active_cancellation_calls_terminate_once() -> None:
+    ledger = FakeLedger()
+    batch = FakeBatch()
+    submission = service(ledger, batch)
+    submission.submit("wm_123", request())
+
+    first = submission.cancel("wm_123", "USER_REQUESTED")
+    second = submission.cancel("wm_123", "USER_REQUESTED")
+
+    assert first.status is second.status is ProviderStatus.CANCELLATION_REQUESTED
+    assert batch.terminate_calls == 1
+
+
+def test_status_maps_failed_cancelled_job_to_cancelled() -> None:
+    ledger = FakeLedger()
+    batch = FakeBatch()
+    submission = service(ledger, batch)
+    submitted = submission.submit("wm_123", request())
+    submission.cancel("wm_123", "USER_REQUESTED")
+    batch.status = replace(
+        batch.status,
+        provider_job_id=submitted.provider_job_id,
+        provider_job_arn=submitted.provider_job_arn,
+        status=ProviderStatus.FAILED,
+        stopped_at=datetime(2026, 7, 26, 11, 18, tzinfo=UTC),
+    )
+
+    status = submission.status("wm_123")
+    replayed_status = submission.status("wm_123")
+
+    assert status.status is ProviderStatus.CANCELLED
+    assert status.reason_code == "USER_REQUESTED"
+    assert replayed_status.status is ProviderStatus.CANCELLED
+    assert replayed_status.reason_code == "USER_REQUESTED"
+    assert ledger.records["wm_123"].state is LedgerState.CANCELLED

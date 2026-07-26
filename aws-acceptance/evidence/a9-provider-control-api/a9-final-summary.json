@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-07-26",
+  "status": "COMPLETE",
+  "scope": "AWS provider status and idempotent cancellation API",
+  "deployment": {
+    "region": "eu-north-1",
+    "lambdaFunction": "watermark-staging-submission",
+    "lambdaCodeSha256Base64": "gH29nJeXlh05RaUJUJDVqK7pI7mv6ncWyXseZyukpIs=",
+    "terraformChangesApplied": [
+      "Existing Lambda code updated in place"
+    ],
+    "newAwsServicesCreated": 0,
+    "gpuJobsCreated": 0
+  },
+  "automatedVerification": {
+    "submissionServiceTests": {
+      "passed": 33,
+      "failed": 0
+    },
+    "repositoryTests": {
+      "passed": 230,
+      "skipped": 3,
+      "failed": 0
+    },
+    "mypy": "PASSED",
+    "ruff": "PASSED",
+    "terraformPostDeploymentChanges": 0
+  },
+  "deployedProbes": {
+    "referenceApplicationJobId": "aws_a8_five_20260726t110131z",
+    "referenceProviderJobId": "81abcf51-00fe-477b-9e25-a6bfe45c19f1",
+    "authenticatedStatus": {
+      "httpStatus": 200,
+      "providerStatus": "SUCCEEDED",
+      "submittedAt": "2026-07-26T11:08:16.444000Z",
+      "startedAt": "2026-07-26T11:13:41.897000Z",
+      "stoppedAt": "2026-07-26T11:18:02.972000Z"
+    },
+    "terminalCancellationReplay": {
+      "requests": 2,
+      "httpStatusEach": 202,
+      "providerStatusEach": "SUCCEEDED",
+      "providerJobIdUnchanged": true,
+      "ledgerStateBefore": "SUBMITTED",
+      "ledgerStateAfter": "SUBMITTED",
+      "ledgerReasonCodeAfter": null,
+      "terminateJobCloudTrailEvents": 0
+    },
+    "unknownJob": {
+      "httpStatus": 404,
+      "errorCode": "AWS_GPU_NOT_FOUND",
+      "ledgerRecordCreated": false
+    },
+    "invalidCancellation": {
+      "httpStatus": 400,
+      "errorCode": "AWS_GPU_INVALID_REQUEST"
+    },
+    "unauthenticatedStatus": {
+      "httpStatus": 401,
+      "rejectedBy": "API Gateway JWT authorizer"
+    }
+  },
+  "providerControls": {
+    "describeUsesOnlyReservedProviderJobId": true,
+    "jobIdentityValidated": [
+      "jobId",
+      "jobArn",
+      "jobName",
+      "jobQueue",
+      "jobDefinition",
+      "applicationJobId tag",
+      "requestSha256 tag",
+      "managedBy tag"
+    ],
+    "timestampsNormalized": true,
+    "missingProviderError": "AWS_GPU_PROVIDER_STATE_MISSING",
+    "identityMismatchError": "AWS_GPU_PROVIDER_IDENTITY_MISMATCH",
+    "rawAwsErrorsExposed": false
+  },
+  "finalSafetyState": {
+    "submissionEnabled": false,
+    "batchQueueState": "DISABLED",
+    "computeEnvironmentStatus": "VALID",
+    "desiredVcpus": 0,
+    "activeBatchJobs": 0,
+    "activeEc2Instances": 0,
+    "ebsVolumes": 0,
+    "activeSpotRequests": 0
+  },
+  "deferredToA10": [
+    "FastAPI and PostgreSQL integration",
+    "GCP reconciliation",
+    "Durable application cancellation intent",
+    "Queued application cancellation acceptance",
+    "Running application cancellation acceptance"
+  ]
+}

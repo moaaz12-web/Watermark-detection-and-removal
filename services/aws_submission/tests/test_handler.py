@@ -6,7 +6,12 @@ from typing import Any
 
 from aws_submission.handler import handle_event
 from aws_submission.models import ProviderStatus, StatusResponse
-from aws_submission.service import SubmissionDisabled, SubmissionFailed
+from aws_submission.service import (
+    SubmissionDisabled,
+    SubmissionFailed,
+    SubmissionProviderIdentityMismatch,
+    SubmissionProviderStateMissing,
+)
 
 EXPECTED_SUBJECT = "112010400000000710080"
 
@@ -40,6 +45,18 @@ class ProviderFailingService(FakeService):
             raise ValueError("ClientException: diagnostic detail")
         except ValueError as exc:
             raise SubmissionFailed from exc
+
+
+class MissingProviderService(FakeService):
+    def status(self, application_job_id: str) -> StatusResponse:
+        self.calls.append("status")
+        raise SubmissionProviderStateMissing
+
+
+class MismatchedProviderService(FakeService):
+    def status(self, application_job_id: str) -> StatusResponse:
+        self.calls.append("status")
+        raise SubmissionProviderIdentityMismatch
 
 
 def event(
@@ -137,6 +154,32 @@ def test_exact_status_route_returns_provider_neutral_status() -> None:
 
     assert response["statusCode"] == 200
     assert json.loads(response["body"])["status"] == "RESERVED"
+
+
+def test_missing_reserved_provider_job_returns_stable_retryable_error() -> None:
+    response = handle_event(
+        event("GET /internal/v1/gpu-jobs/{applicationJobId}"),
+        service=MissingProviderService(),
+        expected_subject=EXPECTED_SUBJECT,
+    )
+
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 503
+    assert body["error"]["code"] == "AWS_GPU_PROVIDER_STATE_MISSING"
+    assert body["error"]["retryable"] is True
+
+
+def test_mismatched_provider_identity_returns_stable_non_retryable_error() -> None:
+    response = handle_event(
+        event("GET /internal/v1/gpu-jobs/{applicationJobId}"),
+        service=MismatchedProviderService(),
+        expected_subject=EXPECTED_SUBJECT,
+    )
+
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 502
+    assert body["error"]["code"] == "AWS_GPU_PROVIDER_IDENTITY_MISMATCH"
+    assert body["error"]["retryable"] is False
 
 
 def test_unknown_route_returns_404_without_service_call() -> None:

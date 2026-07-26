@@ -1,9 +1,10 @@
 # AWS GPU Watermark Worker: Hybrid Production Setup Plan
 
-Status: Active implementation plan; A0, A1, A3, A4, A5, A6, and the revised A8 scope are complete.
-A2 is complete in this repository, with the external FastAPI repository mirror still pending. A7
-one-image acceptance and A8 five-image/completed-replay acceptance passed. Controlled interruption
-and explicit provider attempt 2 are deferred while production retries remain disabled. The Batch
+Status: Active implementation plan; A0, A1, A3, A4, A5, A6, A9, and the revised A8 scope are
+complete. A2 is complete in this repository, with the external FastAPI repository mirror still
+pending. A7 one-image acceptance and A8 five-image/completed-replay acceptance passed. A9 provider
+status and idempotent terminal cancellation passed without a GPU run. Controlled interruption and
+explicit provider attempt 2 are deferred while production retries remain disabled. The Batch
 foundation is deployed, valid, disabled, and at zero compute capacity.
 
 Last updated: 2026-07-26
@@ -2511,6 +2512,11 @@ comparison, and a fresh live-cost authorization.
 
 ### A9. Complete the AWS provider status and cancellation API
 
+Status (2026-07-26): **Complete.** The existing Lambda was updated in place with no new AWS
+service. Status now describes only the provider job reserved in DynamoDB, validates its immutable
+identity, and returns normalized provider timestamps. Cancellation checks provider state first and
+does not call `TerminateJob` for a terminal job.
+
 Purpose: finish and prove the AWS-side provider control contract before connecting it to FastAPI,
 PostgreSQL, or durable GCP orchestration.
 
@@ -2594,6 +2600,17 @@ Evidence:
 aws-acceptance/evidence/a9-provider-control-api/
 ```
 
+The consolidated implementation, deployed probes, and zero-resource proof are recorded in
+[the A9 final summary](../../aws-acceptance/evidence/a9-provider-control-api/a9-final-summary.json).
+
+Deployed result: authenticated `GET` for completed A8 job
+`aws_a8_five_20260726t110131z` returned the exact provider job
+`81abcf51-00fe-477b-9e25-a6bfe45c19f1`, status `SUCCEEDED`, and submitted/started/stopped
+timestamps. Two terminal-cancellation requests returned the same terminal provider identity and
+left the DynamoDB state unchanged; CloudTrail contained no A9 `TerminateJob` event. Unknown-job,
+invalid-request, and unauthenticated probes returned stable `404`, `400`, and `401` responses
+without creating a reservation.
+
 Rollback:
 
 - Keep AWS submission disabled and the Batch queue disabled.
@@ -2602,15 +2619,15 @@ Rollback:
 
 Acceptance:
 
-- [ ] Status/cancel routes are exact-subject authenticated and stable.
-- [ ] Status is loaded only for the provider identity reserved in DynamoDB and resource identity is
+- [x] Status/cancel routes are exact-subject authenticated and stable.
+- [x] Status is loaded only for the provider identity reserved in DynamoDB and resource identity is
   revalidated.
-- [ ] Cancellation is idempotent and invokes only the reserved Batch job.
-- [ ] Responses expose no credentials, environment, raw AWS exception, or unsanitized container
+- [x] Cancellation is idempotent and invokes only the reserved Batch job.
+- [x] Responses expose no credentials, environment, raw AWS exception, or unsanitized container
   reason.
-- [ ] The completed A8 job passes the deployed status/terminal-cancel probes with no new GPU job.
-- [ ] No second callback Lambda is deployed for the initial production design.
-- [ ] Submission and queue remain disabled, desired vCPUs remain zero, and no EC2/EBS resource is
+- [x] The completed A8 job passes the deployed status/terminal-cancel probes with no new GPU job.
+- [x] No second callback Lambda is deployed for the initial production design.
+- [x] Submission and queue remain disabled, desired vCPUs remain zero, and no EC2/EBS resource is
   created.
 
 Dependencies: A3 and the completed A7/A8 provider records. Estimated scope: one focused AWS
