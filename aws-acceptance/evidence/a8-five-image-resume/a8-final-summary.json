@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-07-26",
+  "formalStatus": "COMPLETE_REVISED_NO_RETRY_SCOPE",
+  "completed": {
+    "fiveImageLifecycle": true,
+    "apiIdempotentReplay": true,
+    "completedCpuReplay": true,
+    "gcsGenerationImmutability": true,
+    "measurementsAndCostEstimate": true,
+    "zeroCapacityCleanup": true
+  },
+  "deferred": {
+    "controlledInterruption": {
+      "status": "DEFERRED",
+      "reason": "Production retries remain disabled; deterministic interruption requires additional test-control code, an image rebuild, and a separately authorized GPU run."
+    },
+    "explicitProviderAttempt2": {
+      "status": "DEFERRED",
+      "reason": "The operator-only attempt-2 path is not enabled and is unnecessary while the Batch retry count remains one."
+    }
+  },
+  "policy": {
+    "batchAttempts": 1,
+    "timeoutSeconds": 5400,
+    "automaticProductionRetryEnabled": false,
+    "retryEnablementGate": "Controlled interruption and explicit attempt-2 acceptance must pass before retries are enabled."
+  },
+  "primaryEvidence": {
+    "fiveImageOutcome": "aws-acceptance/evidence/a8-five-image-resume/a8_five_20260726t110131z-outcome.json",
+    "completedReplay": "aws-acceptance/evidence/a8-five-image-resume/a8_five_20260726t110131z-completed-replay.json",
+    "inputManifest": "aws-acceptance/evidence/a8-five-image-resume/a8_five_20260726t110131z-input-manifest.json",
+    "submissionRequest": "aws-acceptance/evidence/a8-five-image-resume/a8_five_20260726t110131z-request-redacted.json"
+  },
+  "finalCleanup": {
+    "submissionEnabled": false,
+    "batchQueueState": "DISABLED",
+    "computeEnvironmentStatus": "VALID",
+    "computeEnvironmentDesiredVcpus": 0,
+    "activeBatchJobs": 0,
+    "activeEc2Instances": 0,
+    "ebsVolumes": 0,
+    "autoScalingDesiredCapacity": 0,
+    "autoScalingInstances": 0,
+    "activeSpotRequests": 0,
+    "natGateways": 0,
+    "elasticIps": 0,
+    "loadBalancers": 0,
+    "terraformChanges": 0
+  }
+}

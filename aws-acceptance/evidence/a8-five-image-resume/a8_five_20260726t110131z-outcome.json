@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "acceptanceScope": "A8 steps 1 and 2: normal five-image lifecycle run",
+  "applicationJobId": "aws_a8_five_20260726t110131z",
+  "providerJobId": "81abcf51-00fe-477b-9e25-a6bfe45c19f1",
+  "providerJobArn": "arn:aws:batch:eu-north-1:154959837939:job/81abcf51-00fe-477b-9e25-a6bfe45c19f1",
+  "providerAttempt": 1,
+  "terminalStatus": "SUCCEEDED",
+  "exitCode": 0,
+  "createdAtEpochMs": 1785064096444,
+  "startedAtEpochMs": 1785064421897,
+  "stoppedAtEpochMs": 1785064682972,
+  "queueAndProvisioningSeconds": 325.453,
+  "containerRuntimeSeconds": 261.075,
+  "totalProviderLifecycleSeconds": 586.528,
+  "manifest": {
+    "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/input-manifest.json",
+    "generation": "1785063797486050",
+    "itemCount": 5
+  },
+  "output": {
+    "prefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/",
+    "outputManifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/output-manifest.json",
+    "outputManifestGeneration": "1785064675090790",
+    "completionMarkerUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/_COMPLETE.json",
+    "counts": {
+      "total": 5,
+      "succeeded": 4,
+      "skipped": 1,
+      "blocked": 0,
+      "failed": 0
+    },
+    "items": [
+      {
+        "itemId": "asset_1",
+        "source": "images/Screenshot from 2026-07-26 15-57-57.png",
+        "userDesignatedBlockedInput": true,
+        "decision": "NO_WATERMARK",
+        "status": "SKIPPED_NO_WATERMARK",
+        "finalImageUri": null
+      },
+      {
+        "itemId": "asset_2",
+        "source": "images/image copy 6.png",
+        "decision": "INPAINTED",
+        "status": "SUCCEEDED",
+        "finalImageUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_2/inpainted/final.png"
+      },
+      {
+        "itemId": "asset_3",
+        "source": "images/image.png",
+        "decision": "INPAINTED",
+        "status": "SUCCEEDED",
+        "finalImageUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_3/inpainted/final.png"
+      },
+      {
+        "itemId": "asset_4",
+        "source": "images/image copy 4.png",
+        "decision": "INPAINTED",
+        "status": "SUCCEEDED",
+        "finalImageUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_4/inpainted/final.png"
+      },
+      {
+        "itemId": "asset_5",
+        "source": "images/image copy 5.png",
+        "decision": "INPAINTED",
+        "status": "SUCCEEDED",
+        "finalImageUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_5/inpainted/final.png"
+      }
+    ]
+  },
+  "runtime": {
+    "instanceType": "g4dn.xlarge",
+    "gpu": "Tesla T4",
+    "torchVersion": "2.5.1+cu121",
+    "workerImageDigest": "sha256:596493d0665a053a52861ad0b3b585700c2f329238d01ae4a5583e82c656d95d",
+    "batchJobDefinitionRevision": 3,
+    "peakCudaMemoryAllocatedBytes": 3011198976,
+    "peakCudaMemoryReservedBytes": 3344957440,
+    "peakSystemRamBytes": 3279441920
+  },
+  "transferAndStorage": {
+    "gcsInputObjects": 6,
+    "gcsInputBytesReadFromGcp": 610256,
+    "gcsOutputObjects": 62,
+    "gcsOutputBytesWrittenToGcp": 1626102,
+    "note": "These are object payload bytes under the isolated attempt prefix. Provider billing reports may add protocol overhead and post later."
+  },
+  "estimatedAwsRuntimeCostUsd": {
+    "instanceId": "i-05f3d4520cac2995f",
+    "instanceLaunchTime": "2026-07-26T11:09:38Z",
+    "instanceTerminationTime": "2026-07-26T11:20:00Z",
+    "billableEstimateSeconds": 622,
+    "compute": 0.09641,
+    "publicIpv4": 0.000864,
+    "gp3": 0.004012,
+    "total": 0.101286,
+    "note": "Deterministic estimate using the previously verified eu-north-1 rates of USD 0.558 per g4dn.xlarge hour, USD 0.0836 per gp3 GB-month for the 200 GB delete-on-termination volume, and USD 0.005 per in-use public IPv4 hour. Cost Explorer, logs, cross-cloud transfer, credits, taxes, and provider posting delays are excluded."
+  },
+  "idempotency": {
+    "identicalApiReplayReturnedSameProviderJobId": true,
+    "additionalProviderJobCreated": false
+  },
+  "cleanup": {
+    "submissionEnabled": false,
+    "batchQueueState": "DISABLED",
+    "computeEnvironmentDesiredVcpus": 0,
+    "activeEc2Instances": 0,
+    "ebsVolumes": 0
+  },
+  "notes": [
+    "The user-designated blocked image was not classified as blocked by the pipeline; it contained no detected watermark and was safely skipped.",
+    "The normal five-image lifecycle and completed CPU replay passed. Controlled interruption and explicit provider attempt 2 are deferred because production retries remain disabled."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "applicationJobId": "aws_a8_five_20260726t110131z",
+  "manifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/input-manifest.json",
+  "manifestGeneration": "1785063797486050",
+  "outputManifestUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/output-manifest.json",
+  "pipelineVersion": "watermark-v1",
+  "requestSha256": "261d9c340cce2a319392ef60957d910bec81ea7e90084f340b86df72e7f7ecee"
+}

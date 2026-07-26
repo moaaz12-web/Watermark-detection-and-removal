@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "jobId": "aws_a8_five_20260726t110131z",
+  "tenantId": "gpu_acceptance",
+  "pipelineVersion": "watermark-v1",
+  "createdAt": "2026-07-26T11:01:31Z",
+  "items": [
+    {
+      "itemId": "asset_1",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_1.png",
+      "inputGeneration": "1785063719807466",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_1/",
+      "sourceChecksumSha256": "221db7b4dce1c7c5b78e4075c37571303a49ecbca4e2ca8f3c7d1891f6c455ac"
+    },
+    {
+      "itemId": "asset_2",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_2.png",
+      "inputGeneration": "1785063726325516",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_2/",
+      "sourceChecksumSha256": "b8d9e619648eb3678263e3f0964aa532d9160a812d17d91996b4e21f82627d41"
+    },
+    {
+      "itemId": "asset_3",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_3.png",
+      "inputGeneration": "1785063734307837",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_3/",
+      "sourceChecksumSha256": "ae91d7de2e5f0bb2bdb288b09e40e37c7cf1bae6f1d5f8e6a03e6c4f178f6739"
+    },
+    {
+      "itemId": "asset_4",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_4.png",
+      "inputGeneration": "1785063741708252",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_4/",
+      "sourceChecksumSha256": "512a7ee56b4e32548c4342721e244af16784a2e3c52f951f08358b713882ef5b"
+    },
+    {
+      "itemId": "asset_5",
+      "inputUri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_5.png",
+      "inputGeneration": "1785063747977474",
+      "outputPrefix": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/asset_5/",
+      "sourceChecksumSha256": "110634af42cb8fcf09e424f5a1ea4782bc3761a73a85807c421f64f396791fc2"
+    }
+  ]
+}

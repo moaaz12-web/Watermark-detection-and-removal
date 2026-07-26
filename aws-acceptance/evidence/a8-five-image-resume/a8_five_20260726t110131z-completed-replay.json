@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "acceptanceScope": "A8 step 5: completed CPU-only replay",
+  "applicationJobId": "aws_a8_five_20260726t110131z",
+  "executedAt": {
+    "started": "2026-07-26T11:33:00.712980Z",
+    "completed": "2026-07-26T11:35:49.965007Z"
+  },
+  "manifest": {
+    "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-data/gpu_acceptance/aws_a8_five_20260726t110131z/input-manifest.json",
+    "generation": "1785063797486050"
+  },
+  "workerImageDigest": "sha256:596493d0665a053a52861ad0b3b585700c2f329238d01ae4a5583e82c656d95d",
+  "result": {
+    "exitCode": 0,
+    "itemsRead": 5,
+    "itemsReused": 5,
+    "jobCompletionReused": true,
+    "backgroundRemovalStageCalls": 0,
+    "detectionStageCalls": 0,
+    "inpaintingStageCalls": 0,
+    "gpuLifecycleEvents": 0,
+    "providerJobsCreated": 0
+  },
+  "items": [
+    {
+      "itemId": "asset_1",
+      "decision": "NO_WATERMARK",
+      "status": "SKIPPED_NO_WATERMARK",
+      "reused": true
+    },
+    {
+      "itemId": "asset_2",
+      "decision": "INPAINTED",
+      "status": "SUCCEEDED",
+      "reused": true
+    },
+    {
+      "itemId": "asset_3",
+      "decision": "INPAINTED",
+      "status": "SUCCEEDED",
+      "reused": true
+    },
+    {
+      "itemId": "asset_4",
+      "decision": "INPAINTED",
+      "status": "SUCCEEDED",
+      "reused": true
+    },
+    {
+      "itemId": "asset_5",
+      "decision": "INPAINTED",
+      "status": "SUCCEEDED",
+      "reused": true
+    }
+  ],
+  "gcsImmutability": {
+    "listingLineCountBefore": 69,
+    "listingLineCountAfter": 69,
+    "generationInventorySha256Before": "497a00316e4f6a7e3fdb3a7439eb0c109e1867f5f1df85988b1efed3798ebd0f",
+    "generationInventorySha256After": "497a00316e4f6a7e3fdb3a7439eb0c109e1867f5f1df85988b1efed3798ebd0f",
+    "objectsChanged": false
+  },
+  "awsPostcondition": {
+    "submissionEnabled": false,
+    "batchQueueState": "DISABLED",
+    "activeBatchJobs": 0,
+    "computeEnvironmentDesiredVcpus": 0,
+    "activeEc2Instances": 0,
+    "ebsVolumes": 0
+  }
+}

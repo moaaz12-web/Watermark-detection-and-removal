@@ -1,11 +1,12 @@
 # AWS GPU Watermark Worker: Hybrid Production Setup Plan
 
-Status: Active implementation plan; A0, A1, A3, A4, A5, and A6 complete. A2 is complete in this
-repository, with the external FastAPI repository mirror still pending. The tested A5 Linux AMD64
-worker image is published to private ECR under an immutable tag and digest, and the bounded A6
-Batch foundation is deployed, valid, disabled, and at zero compute capacity.
+Status: Active implementation plan; A0, A1, A3, A4, A5, A6, and the revised A8 scope are complete.
+A2 is complete in this repository, with the external FastAPI repository mirror still pending. A7
+one-image acceptance and A8 five-image/completed-replay acceptance passed. Controlled interruption
+and explicit provider attempt 2 are deferred while production retries remain disabled. The Batch
+foundation is deployed, valid, disabled, and at zero compute capacity.
 
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 
 Implementation order: After the provider-neutral worker contract in
 [01-gpu-worker-setup.md](01-gpu-worker-setup.md), before the provider-specific portions of
@@ -1190,10 +1191,10 @@ A1 ─────────────────────────�
                                       A7 one-image acceptance
                                                 |
                                                 v
-                                      A8 five-image/resume
+                                      A8 five-image/replay
 
-A3 + A7 ──> A9 reconciliation/cancel
-A8 + A9 ──> A10 FastAPI staging ──> A11 optional optimization
+A3 + A7/A8 ──> A9 AWS provider status/cancel
+A8 + A9 ──> A10 FastAPI/reconciliation staging ──> A11 optional optimization
 ```
 
 Complete each numbered subtask and its evidence before moving to the next dependency. Planning or
@@ -2360,19 +2361,24 @@ Acceptance:
   transfer charges called out separately.
 - [x] EC2 and worker EBS capacity return to zero and submission is disabled.
 
-Do not start A8. The cache locations and read-only-root regression test are now implemented, and
-Batch job-definition revision 2 supplies those paths at runtime while retaining the accepted A5
-digest. Before a new explicitly approved A7 attempt, repeat the A7 preflight, confirm revision 2
-and zero capacity, review the cost ceiling, and obtain fresh explicit authorization. No image
-rebuild or ECR upload is required for this retry.
+Historical note: A8 was originally held behind the A7 cache/read-only-root remediation and a fresh
+live-cost checkpoint. Those prerequisites were satisfied by the successful revision 3 A7 attempt.
+The subsequent A8 five-image run used the same accepted revision 3 digest and was returned to zero
+capacity after completion.
 
 Dependencies: Foundation checkpoint and explicit live-cost authorization. Estimated scope: one
 carefully monitored acceptance session.
 
-### A8. Run five-image and resumability acceptance
+### A8. Run five-image and completed-replay acceptance
 
-Purpose: prove the maximum initial job, item-level recovery, and completed replay before allowing
-production retries.
+Status (2026-07-26): **Complete for the revised no-retry production scope.** The maximum five-image
+happy path, submission idempotency, immutable completed replay, measurements, and zero-capacity
+cleanup passed. Controlled interruption and explicit provider attempt 2 are deliberately deferred;
+they remain required before production retries can be enabled.
+
+Purpose: prove the maximum initial job and completed replay while production remains limited to one
+provider attempt. Interruption/resume is retained below as the acceptance gate for any future retry
+policy.
 
 #### A8.1 Five-image lifecycle run
 
@@ -2388,7 +2394,20 @@ Verify in one worker process:
 - output counters match the five inputs; and
 - EC2/EBS cleanup returns to zero.
 
-#### A8.2 Controlled interruption/resume
+Result: **Passed.** Application job `aws_a8_five_20260726t110131z` mapped idempotently to exactly
+one Batch job, `81abcf51-00fe-477b-9e25-a6bfe45c19f1`. An identical API replay returned the same
+provider job ID. Job-definition revision 3 ran the immutable worker digest
+`sha256:596493d0665a053a52861ad0b3b585700c2f329238d01ae4a5583e82c656d95d` on one
+`g4dn.xlarge`/Tesla T4 and exited `0`.
+
+All three lifecycle stages initialized and released once. Four items completed with `INPAINTED`;
+the resized user-designated blocked input had no detected watermark and completed safely as
+`SKIPPED_NO_WATERMARK`. It was not classified as blocked, so this run records the model's actual
+decision rather than claiming safety-gate blocking evidence. The output counts were total `5`,
+succeeded `4`, skipped `1`, blocked `0`, and failed `0`. All five item markers, the output
+manifest, and the job marker were written to the isolated GCS prefix.
+
+#### A8.2 Controlled interruption/resume - deferred
 
 Use a separate five-image acceptance job:
 
@@ -2406,11 +2425,25 @@ Use a separate five-image acceptance job:
 This acceptance-only retry proves the future policy. It does not enable automatic retries in
 production.
 
+Decision (2026-07-26): **Deferred while retries remain disabled.** A deterministic interruption
+would require additional test-control code, a new image build/deployment, and another explicitly
+authorized GPU attempt. The deployed Batch definition remains at one attempt, and neither automatic
+retry nor the operator-only attempt-2 path is enabled. These checks must be completed before A10 or
+any later change enables production provider retries. Deferral is not evidence that mid-job
+resumability passed.
+
 #### A8.3 Completed replay without another GPU
 
 After completion, run the same manifest against the finished marker inventory using the worker's
 CPU-only replay harness. Prove zero model-stage calls and no object generation changes. Do not
 launch a third GPU merely to prove completed replay.
+
+Result: **Passed.** The local worker replayed the exact manifest generation
+`1785063797486050`. All five item completions and the job completion were reported with
+`reused=true`; background removal, detection, inpainting, GPU lifecycle, and provider-job counts
+were all zero. The GCS generation inventory contained 68 objects before and after replay, and its
+canonical listing fingerprint remained
+`497a00316e4f6a7e3fdb3a7439eb0c109e1867f5f1df85988b1efed3798ebd0f`.
 
 #### A8.4 Compare evidence and set measured limits
 
@@ -2427,33 +2460,68 @@ Record:
 Set the proposed production timeout and retry policy from evidence. Keep the deployed policy at one
 attempt until A9/A10 explicitly implement an authorized application retry.
 
+Measured result:
+
+| Measurement | A8 result |
+| --- | ---: |
+| Queue and provisioning | 325.453 seconds |
+| Container runtime | 261.075 seconds |
+| Total Batch lifecycle | 586.528 seconds |
+| Peak allocated/reserved GPU memory | 3,011,198,976 / 3,344,957,440 bytes |
+| Peak system RAM | 3,279,441,920 bytes |
+| GCS input payload | 610,256 bytes across five images and one manifest |
+| GCS output payload | 1,626,102 bytes across 62 result/artifact objects |
+| EC2 instance lifetime used for estimate | 622 seconds |
+| Deterministic AWS runtime estimate | `$0.101286` before delayed logs, transfer, credits, taxes, and provider posting |
+
+The estimate uses the previously verified Stockholm rates of `$0.558` per On-Demand
+`g4dn.xlarge` hour, `$0.0836` per `gp3` GB-month for the 200 GB delete-on-termination volume, and
+`$0.005` per in-use public IPv4 hour. The measured lifecycle fits comfortably within the existing
+90-minute timeout. The retry count remains one.
+
 Evidence:
 
 ```text
 aws-acceptance/evidence/a8-five-image-resume/
 ```
 
+The consolidated status is recorded in
+[the A8 final summary](../../aws-acceptance/evidence/a8-five-image-resume/a8-final-summary.json);
+the measured live run and completed replay are recorded in
+[the five-image outcome](../../aws-acceptance/evidence/a8-five-image-resume/a8_five_20260726t110131z-outcome.json)
+and
+[the completed-replay outcome](../../aws-acceptance/evidence/a8-five-image-resume/a8_five_20260726t110131z-completed-replay.json).
+
 Emergency stop and cleanup are identical to A7.
 
 Acceptance:
 
-- [ ] Five items complete in one process with one initialization per stage.
-- [ ] Interruption preserves immutable compatible item markers.
-- [ ] One explicitly authorized follow-up attempt skips compatible items.
-- [ ] Completed CPU replay performs zero model-stage calls and changes no outputs.
-- [ ] Comparative runtime, bytes, cost, and cleanup evidence is complete.
+- [x] Five items complete in one process with one initialization per stage.
+- [ ] Interruption preserves immutable compatible item markers. Deferred until retries are in scope.
+- [ ] One explicitly authorized follow-up attempt skips compatible items. Deferred until retries are
+  in scope.
+- [x] Completed CPU replay performs zero model-stage calls and changes no outputs.
+- [x] Runtime, bytes, deterministic cost, and cleanup evidence for the completed scope is complete.
+- [x] Submission is false, the queue is disabled, desired vCPUs are zero, active Batch jobs/EC2/EBS
+  are zero, and Terraform reports no changes.
 
-Dependencies: A7 and separate explicit authorization for each live attempt. Estimated scope: two
-monitored acceptance sessions plus one CPU replay.
+Dependencies for the completed scope: A7 and one explicitly authorized live A8 attempt.
+Dependencies before enabling retries: controlled interruption, explicit attempt 2, immutable-marker
+comparison, and a fresh live-cost authorization.
 
-### A9. Add events, reconciliation, and cancellation
+### A9. Complete the AWS provider status and cancellation API
 
-Purpose: make GCP reconciliation—not callbacks—the correctness mechanism, and prove cancellation
-without expanding the AWS service.
+Purpose: finish and prove the AWS-side provider control contract before connecting it to FastAPI,
+PostgreSQL, or durable GCP orchestration.
 
-Initial production choice: do not deploy a second callback Lambda. The single submission Lambda
-already provides authenticated status and cancellation routes. EventBridge callback delivery can
-be added later for freshness after polling latency is measured.
+Scope boundary: A9 changes only the AWS submission service and its tests/evidence in this
+repository. It does not implement the GCP reconciler, public FastAPI cancellation workflow,
+PostgreSQL transitions, Cloud Run orchestrator, or live application end-to-end tests; those belong
+to A10.
+
+Initial production choice: do not deploy a second callback Lambda or EventBridge callback target.
+The existing submission Lambda owns authenticated submit, status, and cancellation routes. GCP
+polling in A10 will be the correctness path; EventBridge may be evaluated later only for freshness.
 
 #### A9.1 Finish normalized status
 
@@ -2471,42 +2539,7 @@ The submission Lambda `GET` route:
 Unknown application job -> stable `404`. Missing provider job for a submitted record ->
 `AWS_GPU_PROVIDER_STATE_MISSING`, retryable only while within the reconciliation window.
 
-#### A9.2 Implement GCP reconciliation in the backend repository
-
-Create or extend:
-
-```text
-BACKEND_REPO/app/.../watermark/reconciler.py
-BACKEND_REPO/app/.../watermark/provider/aws_batch.py
-BACKEND_REPO/tests/.../test_watermark_reconciliation.py
-```
-
-For each non-terminal application job due for reconciliation:
-
-1. acquire the existing row/version lock;
-2. call the AWS status route with a freshly minted audience-bound Google ID token;
-3. reject a response whose application job/provider identity differs from PostgreSQL;
-4. apply only allowed monotonic provider/application transitions;
-5. update `lastReconciledAt` and a bounded next-check time;
-6. on AWS `SUCCEEDED`, validate the exact GCS output manifest and job completion marker before
-   setting application `SUCCEEDED`;
-7. on missing/incompatible output, set stable application failure after a bounded consistency
-   window; and
-8. retry transport/throttling failures with jitter without changing the application state.
-
-Suggested polling cadence:
-
-```text
-QUEUED/PROVISIONING: 30-60 seconds
-RUNNING:             60 seconds
-CANCEL_REQUESTED:    15-30 seconds
-stale/backoff:       bounded exponential, maximum 5 minutes
-```
-
-Use the existing durable worker/Cloud Run Job/Scheduler pattern in GCP; never run reconciliation in
-FastAPI `BackgroundTasks`.
-
-#### A9.3 Implement idempotent cancellation
+#### A9.2 Finish idempotent provider cancellation
 
 AWS cancellation route:
 
@@ -2515,68 +2548,73 @@ AWS cancellation route:
 3. calls `TerminateJob` with a fixed sanitized reason for `STARTING`/`RUNNING` or the provider
    cancellation behavior appropriate to queued states;
 4. conditionally records cancellation request/result in DynamoDB; and
-5. returns normalized state rather than claiming immediate application cancellation.
+5. returns normalized provider state rather than claiming immediate application cancellation;
+6. never deletes DynamoDB reservations or immutable GCS evidence.
 
-GCP:
+The A9 live check may query the already-terminal A8 provider job through `GET` and may call
+cancellation repeatedly for that terminal record to prove idempotency without starting a GPU.
+Queued/running cancellation belongs to the A10 application acceptance because it requires a fresh
+application job, durable cancellation intent, reconciliation, and explicit live-cost authorization.
 
-1. FastAPI authorizes the user and records `CANCEL_REQUESTED` first;
-2. durable orchestration calls the AWS cancellation route;
-3. reconciliation waits until provider work stops;
-4. GCP records `CANCELLED`; and
-5. immutable completed item markers remain evidence and are not exposed as a successful job.
+#### A9.3 Prove the provider contract hermetically
 
-#### A9.4 Keep EventBridge optional but test event handling
+Add or complete tests for:
 
-Add pure mapping/deduplication tests for representative AWS Batch EventBridge payloads, unknown
-fields, duplicate `eventId`, and out-of-order state. Do not deploy a callback target by default.
-
-If polling later proves too slow, deploy one event-normalization/callback path only after recording:
-
-- authenticated GCP callback audience/identity;
-- retry/dead-letter behavior;
-- event deduplication table/location;
-- added IAM/logging/cost; and
-- proof that disabling the callback does not affect correctness.
-
-#### A9.5 Failure matrix
-
-Staging/hermetic tests:
-
-| Case | Expected application outcome |
+| Case | Expected AWS provider response |
 | --- | --- |
-| Duplicate/out-of-order provider event | Ignored or monotonic update only. |
-| AWS callback absent | Polling reaches correct state. |
-| Long `RUNNABLE` queue | Remains provisioning until configured age alert. |
-| Worker `FAILED` | Stable failure after output/attempt inspection. |
-| AWS `SUCCEEDED`, GCS completion absent | Never success; bounded validation then failure. |
-| GCS completion present, AWS still running | Wait; do not mark success early. |
-| Cancel before start | Provider stops; application becomes cancelled. |
-| Cancel while running | Terminate, preserve markers, reconcile cancelled. |
-| Repeated cancel | Same normalized result, no extra mutation. |
+| Exact authorized Google subject | Request reaches the route handler. |
+| Wrong/missing subject | Stable authorization failure with no ledger or Batch mutation. |
+| Unknown application job | Stable `404`. |
+| Stored provider job missing | `AWS_GPU_PROVIDER_STATE_MISSING` with bounded retryability. |
+| Queue/definition/name/tag mismatch | Stable integrity failure; never adopt unrelated work. |
+| Every AWS Batch state | Stable provider-neutral state and timestamps. |
+| Raw AWS exception/container reason | Sanitized stable error; raw value not returned. |
+| Cancel terminal job repeatedly | Same normalized terminal result and no extra mutation. |
+| Cancel queued/running fixture | One sanitized `TerminateJob` call and conditional ledger update. |
+| Duplicate/out-of-order state fixture | Mapping remains deterministic and cannot regress state. |
+
+Pure EventBridge payload mapping tests are allowed if they reuse the normalized state mapper, but
+do not create a deployed callback, deduplication store, dead-letter queue, or second Lambda in A9.
+
+#### A9.4 Verify the deployed AWS boundary without a GPU
+
+With submission false and the Batch queue disabled:
+
+1. authenticate as the exact GCP orchestrator identity;
+2. query the completed A8 application job through the real `GET` route;
+3. require its stored provider identity and normalized terminal state;
+4. replay terminal cancellation and require an idempotent terminal response;
+5. run negative authentication, unknown-job, and request-validation probes;
+6. prove no new Batch job or DynamoDB reservation was created; and
+7. prove desired vCPUs, EC2, EBS, and active Batch jobs remain zero.
 
 Evidence:
 
 ```text
-aws-acceptance/evidence/a9-reconciliation-cancellation/
+aws-acceptance/evidence/a9-provider-control-api/
 ```
 
 Rollback:
 
-- Disable the GCP scheduler/reconciler deployment and AWS submission before rolling code back.
-- Keep status read-only.
-- Never delete provider/application records to “fix” a state mismatch; reconcile or repair with an
-  audited transition.
+- Keep AWS submission disabled and the Batch queue disabled.
+- Roll the Lambda code/configuration back through Terraform while preserving the DynamoDB ledger.
+- Never delete a reservation to repair a status or cancellation mismatch.
 
 Acceptance:
 
 - [ ] Status/cancel routes are exact-subject authenticated and stable.
-- [ ] GCP polling reaches correct state with no EventBridge callback.
-- [ ] Invalid/duplicate/out-of-order state cannot corrupt PostgreSQL.
-- [ ] Cancellation during queued and running states is proven.
-- [ ] AWS success without compatible GCS completion never becomes application success.
+- [ ] Status is loaded only for the provider identity reserved in DynamoDB and resource identity is
+  revalidated.
+- [ ] Cancellation is idempotent and invokes only the reserved Batch job.
+- [ ] Responses expose no credentials, environment, raw AWS exception, or unsanitized container
+  reason.
+- [ ] The completed A8 job passes the deployed status/terminal-cancel probes with no new GPU job.
 - [ ] No second callback Lambda is deployed for the initial production design.
+- [ ] Submission and queue remain disabled, desired vCPUs remain zero, and no EC2/EBS resource is
+  created.
 
-Dependencies: A3 and A7. Estimated scope: one AWS session plus two backend sessions.
+Dependencies: A3 and the completed A7/A8 provider records. Estimated scope: one focused AWS
+implementation and verification session; no backend repository session and no GPU run expected.
 
 ### A10. Integrate FastAPI and perform staged rollout
 
@@ -2694,7 +2732,56 @@ Behavior:
 
 No AWS key, Google key, arbitrary image/queue/role/command, or customer token is present.
 
-#### A10.5 Enable staged traffic
+#### A10.5 Implement GCP reconciliation and application cancellation
+
+Create or extend:
+
+```text
+BACKEND_REPO/app/.../watermark/reconciler.py
+BACKEND_REPO/app/.../watermark/provider/aws_batch.py
+BACKEND_REPO/tests/.../test_watermark_reconciliation.py
+```
+
+For each non-terminal application job due for reconciliation:
+
+1. acquire the existing row/version lock;
+2. call the A9 status route with a freshly minted audience-bound Google ID token;
+3. reject a response whose application job/provider identity differs from PostgreSQL;
+4. apply only allowed monotonic provider/application transitions;
+5. update `lastReconciledAt` and a bounded next-check time;
+6. on AWS `SUCCEEDED`, validate the exact GCS output manifest and job completion marker before
+   setting application `SUCCEEDED`;
+7. on missing/incompatible output, set stable application failure after a bounded consistency
+   window; and
+8. retry transport/throttling failures with jitter without changing application state.
+
+Suggested polling cadence:
+
+```text
+QUEUED/PROVISIONING: 30-60 seconds
+RUNNING:             60 seconds
+CANCEL_REQUESTED:    15-30 seconds
+stale/backoff:       bounded exponential, maximum 5 minutes
+```
+
+Use the existing durable worker/Cloud Run Job/Scheduler pattern in GCP; never run reconciliation in
+FastAPI `BackgroundTasks`.
+
+Application cancellation:
+
+1. FastAPI authenticates and authorizes the user/job;
+2. PostgreSQL records `CANCEL_REQUESTED` before any external call;
+3. durable orchestration calls the A9 cancellation route;
+4. reconciliation waits until the reserved provider job stops;
+5. PostgreSQL records `CANCELLED`; and
+6. immutable completed item markers remain internal evidence and are not exposed as a successful
+   application job.
+
+Hermetic backend tests must prove that duplicate/out-of-order provider states cannot regress
+PostgreSQL, AWS `SUCCEEDED` without compatible GCS completion never becomes application success,
+repeated cancellation is idempotent, and transport failures leave durable intent retryable.
+
+#### A10.6 Enable staged traffic
 
 Configuration:
 
@@ -2716,8 +2803,10 @@ Rollout:
 6. run one-image end-to-end;
 7. review GCP/AWS logs, PostgreSQL, GCS generations, WIF, cost, and cleanup;
 8. run five-image end-to-end;
-9. test lost-response replay, wrong tenant, cancellation, missing output, and reconciliation; and
-10. disable submission again until external rollout is explicitly approved.
+9. test lost-response replay, wrong tenant, missing output, and reconciliation;
+10. test cancellation once while queued and once while running, preserving immutable markers and
+    recording the separately authorized GPU cost; and
+11. disable submission again until external rollout is explicitly approved.
 
 The `$60` global AWS budget and email alerts remain active. Add operational dashboards/alarms for:
 
@@ -2728,7 +2817,7 @@ The `$60` global AWS budget and email alerts remain active. Add operational dash
 - EC2 capacity non-zero without a known job; and
 - Batch terminal job without compatible GCS completion.
 
-#### A10.6 End-to-end evidence
+#### A10.7 End-to-end evidence
 
 ```text
 Client
@@ -2764,12 +2853,17 @@ Acceptance:
 - [ ] PostgreSQL stores provider-neutral AWS identity and manifest generation.
 - [ ] Public endpoints remain provider-agnostic and tenant-authorized.
 - [ ] Durable orchestration, reconciliation, cancellation, and output validation work.
+- [ ] Duplicate/out-of-order provider state cannot regress PostgreSQL, and AWS success without
+  compatible GCS completion never becomes application success.
+- [ ] Queued and running application cancellation are proven through durable intent and
+  reconciliation.
 - [ ] One-image and five-image owner-tenant end-to-end staging flows pass.
 - [ ] Feature/concurrency/item limits, budget, dashboards, alarms, and cleanup checks are active.
 - [ ] No external user is enabled without a separate rollout approval.
 
-Dependencies: A8 and A9. Estimated scope: four to six backend sessions plus two monitored staging
-runs.
+Dependencies: A8 and A9. Estimated scope: four to six backend sessions, two monitored happy-path
+staging runs, and separately authorized queued/running cancellation checks. A queued cancellation
+may avoid GPU runtime; a running cancellation intentionally incurs one bounded GPU attempt.
 
 ### A11. Evaluate S3 model replicas and Spot
 
