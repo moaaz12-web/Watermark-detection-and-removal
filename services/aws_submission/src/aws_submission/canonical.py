@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 
 from .models import SubmitRequest
+
+GCS_POLICY_PREFIX_PATTERN = re.compile(
+    r"^gs://[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]/[A-Za-z0-9][A-Za-z0-9._/-]*$"
+)
 
 IMMUTABLE_REQUEST_FIELDS = (
     "schemaVersion",
@@ -26,8 +31,11 @@ class SubmissionPolicy:
         if not self.manifest_prefixes or not self.output_prefixes or not self.pipelines:
             raise ValueError("submission policy allowlists must not be empty")
         prefixes = (*self.manifest_prefixes, *self.output_prefixes)
-        if any(not prefix.startswith("gs://") or not prefix.endswith("/") for prefix in prefixes):
-            raise ValueError("GCS policy prefixes must be gs:// URIs ending in /")
+        if any(
+            GCS_POLICY_PREFIX_PATTERN.fullmatch(prefix) is None or ".." in prefix
+            for prefix in prefixes
+        ):
+            raise ValueError("GCS policy prefixes must be safe non-empty gs:// object prefixes")
 
 
 def canonical_request_bytes(request: SubmitRequest) -> bytes:

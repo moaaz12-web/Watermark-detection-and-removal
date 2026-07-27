@@ -182,6 +182,25 @@ def service(
     )
 
 
+def test_submission_policy_accepts_safe_partial_object_prefix() -> None:
+    policy = SubmissionPolicy(
+        manifest_prefixes=("gs://application-data/account_",),
+        output_prefixes=("gs://application-data/account_",),
+        pipelines=frozenset({"watermark-v1"}),
+    )
+
+    assert policy.manifest_prefixes == ("gs://application-data/account_",)
+
+
+def test_submission_policy_rejects_parent_traversal_prefix() -> None:
+    with pytest.raises(ValueError, match="safe non-empty"):
+        SubmissionPolicy(
+            manifest_prefixes=("gs://application-data/account_../",),
+            output_prefixes=("gs://application-data/account_",),
+            pipelines=frozenset({"watermark-v1"}),
+        )
+
+
 def test_disabled_submission_never_reserves_or_calls_batch() -> None:
     ledger = FakeLedger()
     batch = FakeBatch()
