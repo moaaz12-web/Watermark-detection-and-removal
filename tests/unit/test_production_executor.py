@@ -120,7 +120,7 @@ class RecordingRuntimeProvider:
         return FakeLamaRuntime()
 
 
-def test_builder_prepares_only_enabled_models_and_loads_runtimes_lazily() -> None:
+def test_builder_prepares_only_enabled_models_and_executor_loads_all_runtimes_once() -> None:
     config = load_pipeline_config(PROJECT_ROOT / "configs" / "watermark-v1.yaml").config
     manifest = load_model_manifest(PROJECT_ROOT / "model-manifest.json").manifest
     materializer = RecordingMaterializer()
@@ -140,17 +140,17 @@ def test_builder_prepares_only_enabled_models_and_loads_runtimes_lazily() -> Non
     assert all("owlv2" not in artifact_id for artifact_id in preparer.prepared_ids)
     assert provider.loaded == []
 
-    image = Image.new("RGB", (2, 2), "white")
-    executor.background_removal.run(image)
-    executor.background_removal.close()
-    assert provider.loaded == ["background_removal"]
+    executor.initialize()
 
-    executor.detection.run(image)
-    executor.detection.close()
-    assert provider.loaded == ["background_removal", "detection"]
+    assert provider.loaded == ["background_removal", "detection", "inpainting"]
     assert provider.detection_artifacts is not None
     assert provider.detection_artifacts.yolo is not None
     assert provider.detection_artifacts.grounding_dino is not None
+
+    executor.initialize()
+    assert provider.loaded == ["background_removal", "detection", "inpainting"]
+
+    executor.close()
 
 
 def test_builder_keeps_disabled_detector_artifacts_out_of_runtime_contract() -> None:

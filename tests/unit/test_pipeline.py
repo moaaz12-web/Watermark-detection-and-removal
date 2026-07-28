@@ -95,6 +95,203 @@ class FailingBackgroundStage(BackgroundStage):
         raise RuntimeError("model initialization failed")
 
 
+class LifecycleBackgroundStage(BackgroundStage):
+    def __init__(self, events: list[str], foreground_mask: BinaryMask | None) -> None:
+        super().__init__(foreground_mask)
+        self.events = events
+
+    def initialize(self) -> None:
+        self.events.append("initialize-background")
+
+    def run(self, source: Image.Image) -> BackgroundRemovalOutput:
+        self.events.append("run-background")
+        return super().run(source)
+
+    def close(self) -> None:
+        self.events.append("close-background")
+        super().close()
+
+
+class LifecycleDetectionStage(DetectorStage):
+    def __init__(self, events: list[str], masks: tuple[BinaryMask, ...]) -> None:
+        super().__init__(masks)
+        self.events = events
+
+    def initialize(self) -> None:
+        self.events.append("initialize-detection")
+
+    def run(self, detector_image: Image.Image) -> DetectionOutput:
+        self.events.append("run-detection")
+        return super().run(detector_image)
+
+    def close(self) -> None:
+        self.events.append("close-detection")
+        super().close()
+
+
+class LifecycleInpaintingStage(InpaintingStage):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    def initialize(self) -> None:
+        self.events.append("initialize-inpainting")
+
+    def run(self, source: Image.Image, approved_mask: BinaryMask) -> InpaintingOutput:
+        self.events.append("run-inpainting")
+        return super().run(source, approved_mask)
+
+    def close(self) -> None:
+        self.events.append("close-inpainting")
+        super().close()
+
+
+class CountingBackgroundStage:
+    def __init__(self, foreground_mask: BinaryMask) -> None:
+        self.foreground_mask = foreground_mask
+        self.initialized = 0
+        self.processed = 0
+        self.closed = 0
+
+    def initialize(self) -> None:
+        self.initialized += 1
+
+    def run(self, source: Image.Image) -> BackgroundRemovalOutput:
+        self.processed += 1
+        return BackgroundRemovalOutput(
+            detector_image=Image.new("RGB", source.size, "white"),
+            foreground_mask=self.foreground_mask,
+            artifacts=(),
+        )
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class CountingDetectionStage:
+    def __init__(self) -> None:
+        self.initialized = 0
+        self.processed = 0
+        self.closed = 0
+
+    def initialize(self) -> None:
+        self.initialized += 1
+
+    def run(self, detector_image: Image.Image) -> DetectionOutput:
+        self.processed += 1
+        return DetectionOutput(detection_masks=(), artifacts=())
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+class CountingInpaintingStage:
+    def __init__(self) -> None:
+        self.initialized = 0
+        self.processed = 0
+        self.closed = 0
+
+    def initialize(self) -> None:
+        self.initialized += 1
+
+    def run(self, source: Image.Image, approved_mask: BinaryMask) -> InpaintingOutput:
+        self.processed += 1
+        return InpaintingOutput(final_image=source.copy(), artifacts=())
+
+    def close(self) -> None:
+        self.closed += 1
+
+
+def test_executor_loads_every_stage_once_then_processes_each_item_end_to_end() -> None:
+    events: list[str] = []
+    executor = PipelineExecutor(
+        background_removal=LifecycleBackgroundStage(
+            events, mask((0, 0), (0, 1), (1, 0), (1, 1))
+        ),
+        detection=LifecycleDetectionStage(events, (mask((3, 3)),)),
+        inpainting=LifecycleInpaintingStage(events),
+        safety_gate=gate_config(),
+    )
+
+    outcomes = executor.process(
+        [
+            PipelineItem(item_id="asset_1", source_image=source_image()),
+            PipelineItem(item_id="asset_2", source_image=source_image()),
+        ]
+    )
+
+    assert [outcome.item_id for outcome in outcomes] == ["asset_1", "asset_2"]
+    assert events == [
+        "initialize-background",
+        "initialize-detection",
+        "initialize-inpainting",
+        "run-background",
+        "run-detection",
+        "run-inpainting",
+        "run-background",
+        "run-detection",
+        "run-inpainting",
+        "close-inpainting",
+        "close-detection",
+        "close-background",
+    ]
+
+
+def test_process_one_keeps_models_open_until_explicit_executor_close() -> None:
+    events: list[str] = []
+    executor = PipelineExecutor(
+        background_removal=LifecycleBackgroundStage(
+            events, mask((0, 0), (0, 1), (1, 0), (1, 1))
+        ),
+        detection=LifecycleDetectionStage(events, (mask((3, 3)),)),
+        inpainting=LifecycleInpaintingStage(events),
+        safety_gate=gate_config(),
+    )
+
+    first = executor.process_one(PipelineItem(item_id="asset_1", source_image=source_image()))
+    second = executor.process_one(PipelineItem(item_id="asset_2", source_image=source_image()))
+
+    assert first.status is ItemStatus.SUCCEEDED
+    assert second.status is ItemStatus.SUCCEEDED
+    assert not any(event.startswith("close-") for event in events)
+
+    executor.close()
+
+    assert events[-3:] == [
+        "close-inpainting",
+        "close-detection",
+        "close-background",
+    ]
+
+
+def test_executor_keeps_all_models_resident_across_10000_sequential_items() -> None:
+    background = CountingBackgroundStage(mask((0, 0), (0, 1), (1, 0)))
+    detection = CountingDetectionStage()
+    inpainting = CountingInpaintingStage()
+    executor = PipelineExecutor(
+        background_removal=background,
+        detection=detection,
+        inpainting=inpainting,
+        safety_gate=gate_config(),
+    )
+    source = source_image()
+
+    try:
+        for index in range(10_000):
+            outcome = executor.process_one(
+                PipelineItem(item_id=f"asset_{index}", source_image=source)
+            )
+            assert outcome.status is ItemStatus.SKIPPED_NO_WATERMARK
+    finally:
+        executor.close()
+        source.close()
+
+    assert background.initialized == detection.initialized == inpainting.initialized == 1
+    assert background.processed == detection.processed == 10_000
+    assert inpainting.processed == 0
+    assert background.closed == detection.closed == inpainting.closed == 1
+
+
 def test_executor_uses_original_source_for_inpainting_and_releases_stages() -> None:
     source = source_image()
     background = BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1)))
@@ -131,11 +328,11 @@ def test_executor_reports_stage_initialization_and_release() -> None:
 
     assert [(event.stage, event.phase) for event in events] == [
         ("background_removal", "initialized"),
-        ("background_removal", "released"),
         ("detection", "initialized"),
-        ("detection", "released"),
         ("inpainting", "initialized"),
         ("inpainting", "released"),
+        ("detection", "released"),
+        ("background_removal", "released"),
     ]
     assert all(event.duration_seconds >= 0 for event in events)
 
@@ -157,7 +354,7 @@ def test_unverified_gate_blocks_without_calling_inpainting() -> None:
     assert inpainting.calls == []
 
 
-def test_no_watermark_skips_without_calling_inpainting() -> None:
+def test_no_watermark_keeps_inpainting_resident_without_calling_it() -> None:
     inpainting = InitializableInpaintingStage()
     executor = PipelineExecutor(
         background_removal=BackgroundStage(mask((0, 0), (0, 1), (1, 0))),
@@ -172,7 +369,7 @@ def test_no_watermark_skips_without_calling_inpainting() -> None:
     assert outcome.decision is Decision.NO_WATERMARK
     assert outcome.final_image is None
     assert inpainting.calls == []
-    assert inpainting.initialized == 0
+    assert inpainting.initialized == 1
 
 
 def test_stage_initialization_failure_is_fatal_and_releases_the_stage() -> None:

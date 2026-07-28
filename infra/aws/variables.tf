@@ -80,11 +80,11 @@ variable "gcs_worker_read_prefixes" {
       alltrue([
         for item in var.gcs_worker_read_prefixes :
         can(regex("^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$", item.bucket)) &&
-        can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*/$", item.prefix)) &&
+        can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$", item.prefix)) &&
         !strcontains(item.prefix, "..")
       ])
     )
-    error_message = "Worker read prefixes must use valid bucket names and safe object prefixes ending in /."
+    error_message = "Worker read prefixes must use valid bucket names and safe non-empty object prefixes."
   }
 }
 
@@ -101,11 +101,11 @@ variable "gcs_worker_output_prefixes" {
       alltrue([
         for item in var.gcs_worker_output_prefixes :
         can(regex("^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$", item.bucket)) &&
-        can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*/$", item.prefix)) &&
+        can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$", item.prefix)) &&
         !strcontains(item.prefix, "..")
       ])
     )
-    error_message = "Worker output prefixes must use valid bucket names and safe object prefixes ending in /."
+    error_message = "Worker output prefixes must use valid bucket names and safe non-empty object prefixes."
   }
 }
 
@@ -140,10 +140,14 @@ variable "approved_manifest_prefixes" {
       length(var.approved_manifest_prefixes) > 0 &&
       alltrue([
         for value in var.approved_manifest_prefixes :
-        startswith(value, "gs://") && endswith(value, "/")
+        can(regex(
+          "^gs://[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]/[A-Za-z0-9][A-Za-z0-9._/-]*$",
+          value,
+        )) &&
+        !strcontains(value, "..")
       ])
     )
-    error_message = "Manifest prefixes must be non-empty gs:// prefixes ending in /."
+    error_message = "Manifest prefixes must be safe non-empty gs:// bucket/object prefixes."
   }
 }
 
@@ -156,10 +160,14 @@ variable "approved_output_prefixes" {
       length(var.approved_output_prefixes) > 0 &&
       alltrue([
         for value in var.approved_output_prefixes :
-        startswith(value, "gs://") && endswith(value, "/")
+        can(regex(
+          "^gs://[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]/[A-Za-z0-9][A-Za-z0-9._/-]*$",
+          value,
+        )) &&
+        !strcontains(value, "..")
       ])
     )
-    error_message = "Output prefixes must be non-empty gs:// prefixes ending in /."
+    error_message = "Output prefixes must be safe non-empty gs:// bucket/object prefixes."
   }
 }
 
@@ -170,10 +178,15 @@ variable "pipeline_allowlist" {
 
   validation {
     condition = (
-      length(var.pipeline_allowlist) == 1 &&
-      var.pipeline_allowlist[0] == "watermark-v1"
+      length(var.pipeline_allowlist) >= 1 &&
+      length(var.pipeline_allowlist) == length(toset(var.pipeline_allowlist)) &&
+      contains(var.pipeline_allowlist, "watermark-v1") &&
+      alltrue([
+        for pipeline in var.pipeline_allowlist :
+        contains(["watermark-v1", "watermark-bulk-v1"], pipeline)
+      ])
     )
-    error_message = "The A2 contract allows only watermark-v1."
+    error_message = "pipeline_allowlist must contain watermark-v1 and may additionally contain only watermark-bulk-v1."
   }
 }
 

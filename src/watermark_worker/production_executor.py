@@ -79,7 +79,7 @@ def build_production_executor(
     runtime_provider: ProductionRuntimeProvider,
     on_stage_lifecycle: Callable[[StageLifecycleEvent], None] | None = None,
 ) -> PipelineExecutor:
-    """Prepare immutable artifacts now and load each GPU stage only when execution reaches it."""
+    """Prepare immutable artifacts and assemble one all-resident pipeline executor."""
 
     validate_model_bindings(config, manifest)
     selected_ids = config.model_artifact_ids

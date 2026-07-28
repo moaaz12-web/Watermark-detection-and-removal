@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "recordedDate": "2026-07-28",
+  "status": "COMPLETE_FOR_BOUNDED_RESILIENCE_SCOPE",
+  "applicationJobId": "wm_3274f9d2e54b4a7bb4df1ee5e05b2036",
+  "publicIdempotency": {
+    "key": "a10-resilience-20260728T101335Z",
+    "requests": 2,
+    "httpStatusEach": 202,
+    "sameApplicationJob": true
+  },
+  "providerReplay": {
+    "batchJobId": "54d0c29c-fc9a-4855-adfd-23276b02fd55",
+    "orchestratorExecutions": [
+      "watermark-aws-orchestrator-6vp5q",
+      "watermark-aws-orchestrator-xp95s"
+    ],
+    "sameImmutableRequestReplayed": true,
+    "matchingBatchJobsAfterReplay": 1,
+    "ledgerProviderAttempt": 1,
+    "sameProviderReservationAdopted": true
+  },
+  "batchExecution": {
+    "status": "SUCCEEDED",
+    "attempts": 1,
+    "instanceType": "g4dn.xlarge",
+    "gpu": "NVIDIA Tesla T4"
+  },
+  "applicationReconciliation": {
+    "status": "SUCCEEDED",
+    "totalItems": 5,
+    "items": [
+      {
+        "itemId": "asset_1",
+        "status": "SKIPPED_NO_WATERMARK",
+        "resultAvailable": false
+      },
+      {
+        "itemId": "asset_2",
+        "status": "SUCCEEDED",
+        "resultAvailable": true
+      },
+      {
+        "itemId": "asset_3",
+        "status": "SUCCEEDED",
+        "resultAvailable": true
+      },
+      {
+        "itemId": "asset_4",
+        "status": "SUCCEEDED",
+        "resultAvailable": true
+      },
+      {
+        "itemId": "asset_5",
+        "status": "SUCCEEDED",
+        "resultAvailable": true
+      }
+    ]
+  },
+  "observedAndFixed": {
+    "issue": "The first control-plane pass queried AWS before the asynchronously dispatched orchestrator had created its reservation.",
+    "recoveryDuringRun": "A later scheduled pass adopted the durable reservation and the application completed successfully.",
+    "localBackendFixCommit": "b4fad9c",
+    "fix": "Delay the first provider reconciliation for 60 seconds after orchestrator dispatch.",
+    "focusedWatermarkTestsPassed": 25,
+    "deployed": false
+  },
+  "finalSafetyState": {
+    "fastApiFeatureEnabled": false,
+    "fastApiAssetUploadEnabled": false,
+    "controlPlaneScheduler": "PAUSED",
+    "awsSubmissionEnabled": false,
+    "batchQueueState": "DISABLED",
+    "batchQueueStatus": "VALID",
+    "computeEnvironmentState": "DISABLED",
+    "computeEnvironmentStatus": "VALID",
+    "desiredVcpus": 0,
+    "activeBatchJobs": 0,
+    "activeGpuEc2Instances": 0,
+    "terraformChanges": 0
+  }
+}

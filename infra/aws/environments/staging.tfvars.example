@@ -8,13 +8,13 @@ google_jwt_issuer      = "https://accounts.google.com"
 google_jwt_audience    = "urn:watermark:aws-gpu-submission:staging"
 
 approved_manifest_prefixes = [
-  "gs://OWNER_SUPPLIED_MANIFEST_BUCKET/OWNER_SUPPLIED_PREFIX/",
+  "gs://OWNER_SUPPLIED_DATA_BUCKET/account_",
 ]
 approved_output_prefixes = [
-  "gs://OWNER_SUPPLIED_OUTPUT_BUCKET/OWNER_SUPPLIED_PREFIX/",
+  "gs://OWNER_SUPPLIED_DATA_BUCKET/account_",
 ]
 
-pipeline_allowlist = ["watermark-v1"]
+pipeline_allowlist = ["watermark-v1", "watermark-bulk-v1"]
 submission_enabled = false
 batch_queue_enabled = false
 
@@ -24,7 +24,7 @@ worker_image_digest = ""
 gcs_worker_read_prefixes = [
   {
     bucket = "OWNER_SUPPLIED_DATA_BUCKET"
-    prefix = "OWNER_SUPPLIED_INPUT_PREFIX/"
+    prefix = "account_"
   },
   {
     bucket = "OWNER_SUPPLIED_MODEL_BUCKET"
@@ -35,6 +35,6 @@ gcs_worker_read_prefixes = [
 gcs_worker_output_prefixes = [
   {
     bucket = "OWNER_SUPPLIED_DATA_BUCKET"
-    prefix = "OWNER_SUPPLIED_OUTPUT_PREFIX/"
+    prefix = "account_"
   },
 ]

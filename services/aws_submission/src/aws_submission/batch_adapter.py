@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -47,11 +48,11 @@ class AwsBatchAdapter:
         client: Any,
         *,
         queue_arn: str,
-        job_definition_arn: str,
+        job_definition_arns: Mapping[str, str],
     ) -> None:
         self._client = client
         self._queue_arn = queue_arn
-        self._job_definition_arn = job_definition_arn
+        self._job_definition_arns = dict(job_definition_arns)
 
     def submit(
         self,
@@ -59,19 +60,22 @@ class AwsBatchAdapter:
         deterministic_job_name: str,
         request_sha256: str,
     ) -> ProviderJob:
-        if not self._queue_arn or not self._job_definition_arn:
+        job_definition_arn = self._job_definition_arns.get(request.pipeline_version)
+        pipeline_config = _PIPELINE_CONFIGS.get(request.pipeline_version)
+        if not self._queue_arn or not job_definition_arn or not pipeline_config:
             raise ProviderSubmissionRejected
         try:
             response = self._client.submit_job(
                 jobName=deterministic_job_name,
                 jobQueue=self._queue_arn,
-                jobDefinition=self._job_definition_arn,
+                jobDefinition=job_definition_arn,
                 parameters={
                     "JOB_ID": request.application_job_id,
                     "MANIFEST_URI": request.manifest_uri,
                     "MANIFEST_GENERATION": request.manifest_generation,
                     "OUTPUT_MANIFEST_URI": request.output_manifest_uri,
                     "PIPELINE_VERSION": request.pipeline_version,
+                    "PIPELINE_CONFIG": pipeline_config,
                     "PROVIDER_ATTEMPT": "1",
                 },
                 tags={
@@ -141,6 +145,7 @@ class AwsBatchAdapter:
                 job_arn = job.get("jobArn")
                 if (
                     tags.get("requestSha256") == request_sha256
+                    and job.get("jobDefinition") in self._job_definition_arns.values()
                     and isinstance(job_id, str)
                     and isinstance(job_arn, str)
                 ):
@@ -173,9 +178,10 @@ class AwsBatchAdapter:
             "jobArn": expected_provider_job_arn,
             "jobName": expected_job_name,
             "jobQueue": self._queue_arn,
-            "jobDefinition": self._job_definition_arn,
         }
         if any(job.get(key) != value for key, value in expected_identity.items()):
+            raise ProviderJobIdentityMismatch
+        if job.get("jobDefinition") not in self._job_definition_arns.values():
             raise ProviderJobIdentityMismatch
 
         tags = job.get("tags")
@@ -228,6 +234,11 @@ _AWS_BATCH_STATUSES = frozenset(
         ProviderStatus.FAILED,
     }
 )
+
+_PIPELINE_CONFIGS = {
+    "watermark-v1": "/app/configs/watermark-v1.yaml",
+    "watermark-bulk-v1": "/app/configs/watermark-bulk-v1.yaml",
+}
 
 
 def _timestamp(value: object) -> datetime:

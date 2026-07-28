@@ -92,7 +92,7 @@ class PipelineOutcome:
 
 
 class PipelineExecutor:
-    """Runs one batch by stage, releasing each model stage before the next one."""
+    """Loads every model stage once and processes items end-to-end one at a time."""
 
     def __init__(
         self,
@@ -108,6 +108,8 @@ class PipelineExecutor:
         self.inpainting = inpainting
         self.safety_gate = safety_gate
         self.on_stage_lifecycle = on_stage_lifecycle
+        self._opened_stages: list[tuple[str, PipelineStage]] = []
+        self._closed = False
 
     def process(
         self,
@@ -115,120 +117,120 @@ class PipelineExecutor:
         *,
         on_terminal: Callable[[PipelineOutcome], None] | None = None,
     ) -> list[PipelineOutcome]:
-        outcomes: list[PipelineOutcome | None] = [None] * len(items)
-
-        def record(index: int, outcome: PipelineOutcome) -> None:
-            if outcomes[index] is not None:
-                raise RuntimeError(
-                    f"item {outcome.item_id} produced more than one terminal outcome"
-                )
-            outcomes[index] = outcome
-            if on_terminal is not None:
-                on_terminal(outcome)
-
-        background_outputs: dict[int, BackgroundRemovalOutput] = {}
+        outcomes: list[PipelineOutcome] = []
         try:
-            self._initialize_stage("background_removal", self.background_removal)
-            for index, item in enumerate(items):
-                try:
-                    background_outputs[index] = self.background_removal.run(item.source_image)
-                except Exception as exc:
-                    record(
-                        index,
-                        _failed_outcome(
-                            item=item, error_code=ErrorCode.DETECTOR_FAILED, error=exc
-                        ),
-                    )
+            self.initialize()
+            for item in items:
+                outcome = self.process_one(item)
+                outcomes.append(outcome)
+                if on_terminal is not None:
+                    on_terminal(outcome)
         finally:
-            self._close_stage("background_removal", self.background_removal)
+            self.close()
+        return outcomes
 
-        detection_outputs: dict[int, DetectionOutput] = {}
+    def initialize(self) -> None:
+        if self._closed:
+            raise RuntimeError("pipeline executor is already closed")
+        if self._opened_stages:
+            return
+
         try:
-            self._initialize_stage("detection", self.detection)
-            for index, background in background_outputs.items():
-                try:
-                    detection_outputs[index] = self.detection.run(background.detector_image)
-                except Exception as exc:
-                    record(
-                        index,
-                        _failed_outcome(
-                            item=items[index], error_code=ErrorCode.DETECTOR_FAILED, error=exc
-                        ),
-                    )
-        finally:
-            self._close_stage("detection", self.detection)
-
-        allowed_masks: dict[int, BinaryMask] = {}
-        allowed_outcomes: dict[int, PipelineOutcome] = {}
-        for index, detection in detection_outputs.items():
-            background = background_outputs[index]
-            evaluation = evaluate_safety_gate(
-                detection_masks=list(detection.detection_masks),
-                foreground_mask=background.foreground_mask,
-                config=self.safety_gate,
-            )
-            artifacts = [*background.artifacts, *detection.artifacts]
-            if evaluation.approved_mask is not None:
-                artifacts.append(
-                    StageArtifact(
-                        relative_name="masks/combined_mask.png",
-                        data=evaluation.approved_mask.to_png_bytes(),
-                        content_type="image/png",
-                    )
-                )
-            outcome = _outcome_for_gate(
-                item_id=items[index].item_id,
-                detection_count=len(detection.detection_masks),
-                evaluation=evaluation,
-                artifacts=tuple(artifacts),
-            )
-            if (
-                evaluation.decision is SafetyDecision.ALLOWED
-                and evaluation.approved_mask is not None
+            for name, stage in (
+                ("background_removal", self.background_removal),
+                ("detection", self.detection),
+                ("inpainting", self.inpainting),
             ):
-                allowed_masks[index] = evaluation.approved_mask
-                allowed_outcomes[index] = outcome
-            else:
-                record(index, outcome)
+                self._opened_stages.append((name, stage))
+                self._initialize_stage(name, stage)
+        except Exception:
+            self.close()
+            raise
+
+    def process_one(self, item: PipelineItem) -> PipelineOutcome:
+        self.initialize()
+        try:
+            background = self.background_removal.run(item.source_image)
+        except Exception as exc:
+            return _failed_outcome(
+                item=item,
+                error_code=ErrorCode.DETECTOR_FAILED,
+                error=exc,
+            )
 
         try:
-            if allowed_masks:
-                self._initialize_stage("inpainting", self.inpainting)
-            for index, approved_mask in allowed_masks.items():
-                try:
-                    # The original source is intentionally the only inpainting input.
-                    inpainted = self.inpainting.run(items[index].source_image, approved_mask)
-                    previous = allowed_outcomes[index]
-                    outcome = PipelineOutcome(
-                        item_id=previous.item_id,
-                        status=ItemStatus.SUCCEEDED,
-                        decision=Decision.INPAINTED,
-                        detection_count=previous.detection_count,
-                        warning_codes=previous.warning_codes,
-                        artifacts=(*previous.artifacts, *inpainted.artifacts),
-                        final_image=inpainted.final_image,
-                        combined_mask=approved_mask,
-                        safety_gate=previous.safety_gate,
-                    )
-                except Exception as exc:
-                    outcome = _failed_outcome(
-                        item=items[index], error_code=ErrorCode.INPAINTING_FAILED, error=exc
-                    )
-                record(index, outcome)
-        finally:
-            self._close_stage("inpainting", self.inpainting)
-
-        terminal: list[PipelineOutcome] = []
-        for index, (item, current) in enumerate(zip(items, outcomes, strict=True)):
-            if current is None:
-                current = _failed_outcome(
+            try:
+                detection = self.detection.run(background.detector_image)
+            except Exception as exc:
+                return _failed_outcome(
                     item=item,
-                    error_code=ErrorCode.UNEXPECTED_FATAL,
-                    error=RuntimeError("pipeline produced no terminal outcome"),
+                    error_code=ErrorCode.DETECTOR_FAILED,
+                    error=exc,
                 )
-                record(index, current)
-            terminal.append(current)
-        return terminal
+        finally:
+            background.detector_image.close()
+
+        evaluation = evaluate_safety_gate(
+            detection_masks=list(detection.detection_masks),
+            foreground_mask=background.foreground_mask,
+            config=self.safety_gate,
+        )
+        artifacts = [*background.artifacts, *detection.artifacts]
+        if evaluation.approved_mask is not None:
+            artifacts.append(
+                StageArtifact(
+                    relative_name="masks/combined_mask.png",
+                    data=evaluation.approved_mask.to_png_bytes(),
+                    content_type="image/png",
+                )
+            )
+        gated = _outcome_for_gate(
+            item_id=item.item_id,
+            detection_count=len(detection.detection_masks),
+            evaluation=evaluation,
+            artifacts=tuple(artifacts),
+        )
+        if (
+            evaluation.decision is not SafetyDecision.ALLOWED
+            or evaluation.approved_mask is None
+        ):
+            return gated
+
+        try:
+            # The original source is intentionally the only inpainting input.
+            inpainted = self.inpainting.run(item.source_image, evaluation.approved_mask)
+        except Exception as exc:
+            return _failed_outcome(
+                item=item,
+                error_code=ErrorCode.INPAINTING_FAILED,
+                error=exc,
+            )
+        return PipelineOutcome(
+            item_id=gated.item_id,
+            status=ItemStatus.SUCCEEDED,
+            decision=Decision.INPAINTED,
+            detection_count=gated.detection_count,
+            warning_codes=gated.warning_codes,
+            artifacts=(*gated.artifacts, *inpainted.artifacts),
+            final_image=inpainted.final_image,
+            combined_mask=evaluation.approved_mask,
+            safety_gate=gated.safety_gate,
+        )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        first_error: Exception | None = None
+        for name, stage in reversed(self._opened_stages):
+            try:
+                self._close_stage(name, stage)
+            except Exception as exc:
+                if first_error is None:
+                    first_error = exc
+        self._opened_stages.clear()
+        if first_error is not None:
+            raise first_error
 
     def _initialize_stage(self, name: str, stage: PipelineStage) -> None:
         started = time.monotonic()

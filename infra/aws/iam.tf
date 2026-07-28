@@ -44,11 +44,11 @@ data "aws_iam_policy_document" "submission_lambda" {
         "batch:SubmitJob",
         "batch:TagResource",
       ]
-      resources = [
-        aws_batch_job_queue.gpu.arn,
-        local.batch_job_definition_arn,
-        "arn:aws:batch:${var.aws_region}:${var.aws_account_id}:job/*",
-      ]
+      resources = concat(
+        [aws_batch_job_queue.gpu.arn],
+        values(local.batch_job_definition_arns),
+        ["arn:aws:batch:${var.aws_region}:${var.aws_account_id}:job/*"],
+      )
 
       condition {
         test     = "StringEquals"

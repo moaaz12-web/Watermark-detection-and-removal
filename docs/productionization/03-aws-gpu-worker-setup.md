@@ -1969,7 +1969,7 @@ Launch template:
 Managed EC2 compute environment:
 
 ```text
-state: ENABLED
+state: DISABLED at rest; ENABLED only while batch_queue_enabled=true
 type: EC2 On-Demand
 allocation strategy: BEST_FIT
 instance types: g4dn.xlarge only
@@ -1981,6 +1981,10 @@ security group: no inbound
 instance profile: dedicated ECS compute profile
 GPU-optimized ECS image type supported by current AWS Batch
 ```
+
+Terraform ties the compute-environment state to the same explicit gate as the job queue. Closing
+`batch_queue_enabled` therefore disables both the queue and its compute environment, in addition
+to retaining zero minimum and desired capacity.
 
 `BEST_FIT` is deliberate. For On-Demand compute environments, AWS documents that allocation
 strategies other than `BEST_FIT` can exceed `maxvCpus` by one instance. With only one allowed
@@ -2638,7 +2642,99 @@ implementation and verification session; no backend repository session and no GP
 Purpose: connect the already-proven AWS execution provider to the authoritative GCP application
 without exposing AWS to users.
 
-All A10 application files live in `BACKEND_REPO`, not this worker repository.
+Status (2026-07-28): **Implementation and the cross-cloud infrastructure path are proven; staged
+functional acceptance remains open.** A controlled one-image request completed the full
+FastAPI/GCP/AWS/GCS reconciliation path and AWS returned to zero GPU capacity. The submitted source
+was a multi-panel debug collage and the resulting image was mostly blank, so that run did not prove
+normal-image output quality. The result was inspected directly in GCS rather than downloaded
+through the authenticated FastAPI result route.
+
+This A10 section is the authoritative implementation and acceptance checklist. Use the
+[controlled one-image E2E operator runbook](07-a10-controlled-e2e-operator-runbook.md) for the
+copy-paste operational commands.
+
+Use the copy-paste-ready
+[A10 FastAPI agent implementation prompt](05-a10-fastapi-agent-implementation-prompt.md) when
+starting work in the separate backend repository. That prompt is intentionally local-only: the
+backend agent does not push Git changes, apply migrations, deploy, change cloud resources, call the
+live AWS API, or launch GPU work. The owner performs those actions separately.
+
+Repository boundaries:
+
+```text
+GPU worker, AWS submission service, and AWS Terraform:
+/home/maaz/Desktop/watermarkPoc
+
+FastAPI, PostgreSQL models, GCP control plane, and Cloud Run Jobs:
+/home/maaz/Desktop/infringement_project/infringement_backend
+```
+
+Accepted architecture:
+
+1. FastAPI, PostgreSQL, tenant authorization, durable application state, GCS data, reconciliation,
+   and result delivery remain in GCP.
+2. AWS is only the temporary GPU execution provider.
+3. DynamoDB is only the AWS submission/idempotency ledger and is not application storage.
+4. The browser never calls AWS and FastAPI stores no AWS access key.
+5. The existing GPU worker image remains unchanged during A10 unless a separately diagnosed worker
+   defect requires a rebuild.
+6. The initial maximum is five images with one concurrent job per tenant.
+7. Disabled AWS Batch definitions, API Gateway, Lambda, DynamoDB, ECR, and a paused scheduler may
+   remain provisioned; a GPU exists only while Batch is executing a submitted job.
+
+Application objects use the existing shared bucket and worker-compatible paths:
+
+```text
+bucket:
+gs://project-5909a738-2fdc-451e-ad6-watermark-data
+
+registered asset:
+gs://<bucket>/account_<accountId>/assets/<assetToken>/original.<extension>
+
+staged input:
+gs://<bucket>/account_<accountId>/<jobId>/<itemId>.<extension>
+
+input manifest:
+gs://<bucket>/account_<accountId>/<jobId>/input-manifest.json
+
+outputs:
+gs://<bucket>/account_<accountId>/<jobId>/<itemId>/...
+```
+
+Three separate GCS buckets remain deferred because the packaged worker currently accepts this
+layout. Changing that storage contract would require a reviewed worker change, GPU image rebuild,
+ECR push, immutable digest update, and Batch job-definition revision without improving the initial
+functional acceptance.
+
+Implemented state:
+
+- migration `0047_add_watermark_application_jobs.py` has been applied to Cloud SQL;
+- trusted asset upload/registration and generation-pinned input copying exist;
+- provider-neutral job, item, and durable intent records exist in PostgreSQL;
+- authenticated create/get/list/items/cancel/result routes exist;
+- `watermark-aws-orchestrator` and `watermark-control-plane` are deployed as CPU-only Cloud Run
+  Jobs in `us-central1`;
+- the AWS application prefix allowlist accepts only the selected `account_` namespace;
+- the orchestrator uses a Google service-account ID token for audience
+  `urn:watermark:aws-gpu-submission:staging`;
+- the AWS provider status/cancellation routes and reconciliation/output validation are connected;
+  and
+- the last controlled shutdown left the feature flags false, scheduler paused, AWS submission
+  false, Batch queue/compute disabled, desired vCPUs zero, and no GPU instance or active Batch job.
+
+The concrete staging provider configuration is:
+
+```text
+GCP project: project-5909a738-2fdc-451e-ad6
+GCP region: us-central1
+AWS account: 154959837939
+AWS region: eu-north-1
+AWS API: https://g3qk2f8rsg.execute-api.eu-north-1.amazonaws.com/staging
+AWS Batch queue/compute environment: watermark-staging-gpu
+submission Lambda: watermark-staging-submission
+orchestrator service account:
+watermark-aws-orchestrator@project-5909a738-2fdc-451e-ad6.iam.gserviceaccount.com
+```
 
 #### A10.1 Add the provider-neutral database migration
 
@@ -2867,16 +2963,76 @@ Rollback:
 
 Acceptance:
 
-- [ ] PostgreSQL stores provider-neutral AWS identity and manifest generation.
-- [ ] Public endpoints remain provider-agnostic and tenant-authorized.
-- [ ] Durable orchestration, reconciliation, cancellation, and output validation work.
+- [x] PostgreSQL stores provider-neutral AWS identity and manifest generation.
+- [x] Public endpoints remain provider-agnostic and tenant-authorized by implementation and
+  focused tests.
+- [x] Durable orchestration, provider-identity adoption, reconciliation, and output validation
+  completed one real cross-cloud run.
 - [ ] Duplicate/out-of-order provider state cannot regress PostgreSQL, and AWS success without
-  compatible GCS completion never becomes application success.
+  compatible GCS completion never becomes application success in integrated staging tests.
 - [ ] Queued and running application cancellation are proven through durable intent and
   reconciliation.
-- [ ] One-image and five-image owner-tenant end-to-end staging flows pass.
-- [ ] Feature/concurrency/item limits, budget, dashboards, alarms, and cleanup checks are active.
+- [x] One-image and five-image owner-tenant end-to-end staging flows pass.
+- [x] Feature/concurrency/item limits and the `$60` global AWS budget are configured.
+- [ ] Required operational alarms and final repeated cleanup checks are active.
 - [ ] No external user is enabled without a separate rollout approval.
+
+#### A10.8 Remaining staged acceptance and reliability gate
+
+Run these in order. The first test uses the
+[controlled E2E operator runbook](07-a10-controlled-e2e-operator-runbook.md); later tests may reuse
+the same enable, monitor, authenticated-download, and shutdown boundaries.
+
+1. Repeat the one-image flow with a normal, unprocessed watermarked source image.
+2. Download the successful result through the authenticated FastAPI endpoint and visually compare
+   it with the source. A valid PNG or `SUCCEEDED` state alone is insufficient: unrelated image
+   content must not be blanked or severely damaged.
+3. Run one five-image owner-tenant job and confirm all items reconcile independently while only one
+   AWS Batch job is created.
+4. Replay the same public idempotency key and immutable request. Require the same FastAPI
+   application job and the same AWS provider job, with no second billable GPU job.
+5. Simulate or exercise an uncertain/lost submission response and require adoption of the same AWS
+   provider reservation.
+6. Process the blocked test image and require no public final image.
+7. Reject wrong-account asset, job, item, and result access.
+8. Confirm AWS `SUCCEEDED` without a compatible generation-pinned GCS completion marker never
+   becomes application `SUCCEEDED`.
+9. Prove queued cancellation. Prove running cancellation only with explicit approval for the
+   additional bounded GPU cost.
+10. Confirm duplicate or older provider observations cannot regress terminal PostgreSQL state.
+11. After every GPU-bearing test, pause/disable the controlled switches and prove no active Batch
+    job, GPU EC2 instance, or desired vCPU capacity remains.
+
+Failure behavior, idempotent replay, and five-image worker execution already have unit/hermetic or
+AWS-provider evidence from A8/A9. They remain open here specifically until proven through the full
+FastAPI/GCP/AWS application path.
+
+Resilience acceptance on 2026-07-28 completed steps 3-5 and 11 through the full
+FastAPI/GCP/AWS path:
+
+- two public requests with idempotency key `a10-resilience-20260728T101335Z` returned the same
+  application job;
+- replaying the exact immutable orchestrator invocation adopted the same DynamoDB reservation and
+  left exactly one AWS Batch job;
+- the one Batch attempt succeeded and FastAPI independently reconciled all five items: one
+  `SKIPPED_NO_WATERMARK` and four `SUCCEEDED` with results available; and
+- the final shutdown left both FastAPI feature flags false, the scheduler paused, AWS submission
+  false, Batch queue/compute disabled and valid, desired vCPUs zero, no active Batch job, no GPU
+  EC2 instance, and a zero-change Terraform plan.
+
+The run also exposed a bounded dispatch/reconciliation race: the first control-plane pass could
+query AWS before the asynchronously launched orchestrator created its reservation. The backend
+fix delays the first provider reconciliation by 60 seconds and passes all 25 focused watermark
+tests in local commit `b4fad9c`. Push and deploy that commit before the next enabled run. The
+redacted run record is
+[the A10 resilience summary](../../aws-acceptance/evidence/a10-end-to-end/a10-resilience-summary.json).
+
+A10 may be called **infrastructure and bounded resilience path validated** now. It may be called
+**ready for limited production use** only after the local race fix is deployed and the remaining
+required steps above are either completed or explicitly accepted as deferred product/operational
+scope. Running cancellation and broader alarms can remain explicitly tracked follow-ups if the
+initial product does not expose cancellation to users. Do not describe model accuracy generally
+as proven by this bounded acceptance.
 
 Dependencies: A8 and A9. Estimated scope: four to six backend sessions, two monitored happy-path
 staging runs, and separately authorized queued/running cancellation checks. A queued cancellation

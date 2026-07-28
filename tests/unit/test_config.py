@@ -246,3 +246,21 @@ def test_frozen_pipeline_v1_matches_its_model_manifest() -> None:
         "detection_segmentation",
         "inpainting",
     ]
+
+
+def test_bulk_pipeline_uses_the_same_models_with_a_10000_item_limit() -> None:
+    small = load_pipeline_config(PROJECT_ROOT / "configs" / "watermark-v1.yaml")
+    bulk = load_pipeline_config(PROJECT_ROOT / "configs" / "watermark-bulk-v1.yaml")
+    loaded_models = load_model_manifest(PROJECT_ROOT / "model-manifest.json")
+
+    validate_model_bindings(bulk.config, loaded_models.manifest)
+
+    assert bulk.config.pipeline_version == "watermark-bulk-v1"
+    assert bulk.config.limits.maximum_items == 10_000
+    assert bulk.config.model_artifact_ids == small.config.model_artifact_ids
+    assert bulk.config.background_removal == small.config.background_removal
+    assert bulk.config.detection == small.config.detection
+    assert bulk.config.segmentation == small.config.segmentation
+    assert bulk.config.safety_gate == small.config.safety_gate
+    assert bulk.config.inpainting == small.config.inpainting
+    assert bulk.config.storage == small.config.storage

@@ -8,7 +8,7 @@ FROM ${PYTHON_IMAGE} AS builder
 
 # uv's documented non-editable multi-stage pattern:
 # https://docs.astral.sh/uv/guides/integration/docker/#non-editable-installs
-COPY --from=ghcr.io/astral-sh/uv@sha256:f8f31ad675ac1a6e17ccabe0e5bbb7fe941b2a27f38cb509c799870570b2f1a7 /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.10.9@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

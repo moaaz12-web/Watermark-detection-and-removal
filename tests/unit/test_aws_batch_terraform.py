@@ -98,6 +98,28 @@ def test_a6_job_definition_is_digest_gated_and_gpu_bounded() -> None:
     assert 'value="/tmp/watermark-worker/cache"' in compact
 
 
+def test_bulk_job_definition_keeps_g4dn_and_has_a_bounded_24_hour_retry_envelope() -> None:
+    compact = compact_terraform_text()
+
+    assert 'instance_type=["g4dn.xlarge"]' in compact
+    assert 'resource"aws_batch_job_definition""gpu_worker_bulk"' in compact
+    assert 'name="${local.batch_job_name}-bulk"' in compact
+    assert 'PIPELINE_CONFIG="/app/configs/watermark-bulk-v1.yaml"' in compact
+    assert '"--config","Ref::PIPELINE_CONFIG"' in compact
+    assert (
+        "container_properties=aws_batch_job_definition.gpu_worker[0].container_properties"
+        not in compact
+    )
+    assert 'attempts=2' in compact
+    assert 'attempt_duration_seconds=86400' in compact
+    assert 'action="RETRY"' in compact
+    assert 'on_status_reason="HostEC2*"' in compact
+    assert 'on_exit_code="6"' in compact
+    assert 'on_exit_code="7"' in compact
+    assert 'action="EXIT"' in compact
+    assert 'on_exit_code="*"' in compact
+
+
 def test_a6_lambda_batch_permissions_never_use_wildcard_actions() -> None:
     text = terraform_text()
     compact = compact_terraform_text()

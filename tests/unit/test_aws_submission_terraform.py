@@ -63,3 +63,16 @@ def test_lambda_role_retains_scoped_ledger_and_log_permissions() -> None:
     assert "dynamodb:UpdateItem" in text
     assert "logs:CreateLogStream" in text
     assert "logs:PutLogEvents" in text
+
+
+def test_submission_lambda_receives_exact_small_and_bulk_job_definitions() -> None:
+    text = terraform_text()
+    compact = compact_terraform_text()
+
+    assert "BATCH_JOB_DEFINITION_ARNS" in text
+    assert "BATCH_JOB_DEFINITION_ARN   =" not in text
+    assert '"watermark-v1"=try(aws_batch_job_definition.gpu_worker[0].arn,"")' in compact
+    assert (
+        '"watermark-bulk-v1"=try(aws_batch_job_definition.gpu_worker_bulk[0].arn,"")'
+        in compact
+    )

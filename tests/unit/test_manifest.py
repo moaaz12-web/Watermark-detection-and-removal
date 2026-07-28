@@ -100,3 +100,26 @@ def test_manifest_uri_must_match_trusted_job_prefix() -> None:
             policy(),
             manifest_uri="gs://manifest-bucket/tenant_17/other-job/input-manifest.json",
         )
+
+
+def test_bulk_manifest_rejects_more_than_10000_items() -> None:
+    manifest = InputManifest.model_validate(gcs_payload()).model_copy(
+        update={
+            "pipeline_version": "watermark-bulk-v1",
+            "items": InputManifest.model_validate(gcs_payload()).items * 10_001,
+        }
+    )
+    bulk_policy = ManifestPolicy(
+        pipeline_version="watermark-bulk-v1",
+        maximum_items=10_000,
+        allowed_manifest_buckets={"manifest-bucket"},
+        allowed_input_buckets={"input-bucket"},
+        output_bucket="output-bucket",
+    )
+
+    with pytest.raises(InvalidManifestError, match="maximum is 10000"):
+        validate_manifest(
+            manifest,
+            bulk_policy,
+            manifest_uri="gs://manifest-bucket/tenant_17/wm_123/input-manifest.json",
+        )

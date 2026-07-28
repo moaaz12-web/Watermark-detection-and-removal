@@ -11,6 +11,19 @@ worker images inside AWS from a small operator-uploaded source ZIP. BuildKit sto
 in a separate mutable ECR cache repository; reviewed release tags remain in the immutable worker
 repository.
 
+When an image digest is configured, Terraform defines two trusted Batch execution profiles:
+
+- `watermark-v1`, capped by its packaged five-item configuration with a 90-minute timeout and one
+  attempt; and
+- `watermark-bulk-v1`, capped by its packaged 10,000-item configuration with a 24-hour per-attempt
+  timeout and two attempts. The bulk definition retries EC2 host failures and worker exit codes
+  `6` and `7`, which represent retryable storage and external-service failures. All other worker
+  exits fail immediately.
+
+The submission Lambda maps each exact pipeline identity to its dedicated job-definition ARN and
+packaged configuration path. A caller cannot supply an arbitrary job definition or configuration
+file.
+
 It intentionally creates no direct EC2 instance, GPU, NAT gateway, Elastic IP, load balancer, SSH
 key, or standalone EBS volume. The managed compute environment has `min_vcpus=0`,
 `desired_vcpus=0`, `max_vcpus=4`, and permits only `g4dn.xlarge`. The queue and API submission
@@ -93,3 +106,20 @@ processed one PNG through background removal, detection, and LaMa inpainting, wr
 and completion manifests to GCS, exited `0`, and automatically terminated its one `g4dn.xlarge`.
 The queue and submission gate were then returned to their disabled defaults. Final evidence is in
 `aws-acceptance/evidence/a7-one-image/lama-fix-run-outcome.json`.
+
+The bulk-worker deployment completed on 2026-07-28. CodeBuild tag
+`bulk-20260728t172927z` resolves to immutable ECR digest
+`sha256:f3e14394f94df90845ea840983baabeda988a40a366172058cac030cf59241b1`.
+The deployed definitions are `watermark-staging-worker:4` for `watermark-v1` and
+`watermark-staging-worker-bulk:1` for `watermark-bulk-v1`. Lambda is active, accepts both exact
+pipeline identities, and remains configured with `SUBMISSION_ENABLED=false`. The queue and compute
+environment are `DISABLED`, desired vCPUs are zero, and the post-apply Terraform plan reports no
+changes. Final checks found no active Batch jobs or `g4dn.xlarge` instances.
+
+The first bulk CodeBuild attempt failed before image creation because the Dockerfile referenced an
+architecture-specific uv manifest that BuildKit could not resolve from GHCR. The Dockerfiles now
+pin uv `0.10.9` using its immutable multi-platform index digest. During the first Terraform apply,
+the AWS provider normalized hidden empty arrays in one job definition and rejected a second
+definition that copied the first resource's computed JSON. `batch-job.tf` now constructs both
+definitions from one local container-property value, avoiding that provider-dependent
+cross-resource normalization. The corrected saved plan applied successfully.

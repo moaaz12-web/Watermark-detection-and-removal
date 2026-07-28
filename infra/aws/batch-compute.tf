@@ -45,7 +45,7 @@ resource "aws_launch_template" "batch_gpu" {
 resource "aws_batch_compute_environment" "gpu" {
   name         = local.batch_compute_name
   type         = "MANAGED"
-  state        = "ENABLED"
+  state        = var.batch_queue_enabled ? "ENABLED" : "DISABLED"
   service_role = aws_iam_service_linked_role.batch.arn
 
   compute_resources {

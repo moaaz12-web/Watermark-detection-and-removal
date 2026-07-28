@@ -47,6 +47,10 @@ locals {
 
   batch_image_ready        = var.worker_image_digest != ""
   batch_job_definition_arn = try(aws_batch_job_definition.gpu_worker[0].arn, "")
+  batch_job_definition_arns = {
+    "watermark-v1"      = try(aws_batch_job_definition.gpu_worker[0].arn, "")
+    "watermark-bulk-v1" = try(aws_batch_job_definition.gpu_worker_bulk[0].arn, "")
+  }
 
   common_tags = {
     Application = "watermark"

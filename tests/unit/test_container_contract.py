@@ -23,7 +23,11 @@ def test_container_uses_immutable_build_inputs_and_locked_runtime_dependencies()
         "00af38ae2ed311628970782e8a2d7f014d8909dbc63cb97bc0a158187f4db045"
         in content
     )
-    assert "ghcr.io/astral-sh/uv@sha256:" in content
+    assert (
+        "ghcr.io/astral-sh/uv:0.10.9@sha256:"
+        "10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82"
+        in content
+    )
     assert "uv sync --locked --no-dev --no-editable" in content
     assert "python -m pip uninstall --yes pip setuptools wheel" in content
     assert "pip install" not in content
@@ -55,6 +59,11 @@ def test_gpu_container_requires_phase_b_immutable_build_inputs() -> None:
     assert "ARG GPU_BASE_IMAGE" in content
     assert "ARG GPU_BASE_IMAGE=" not in content
     assert "FROM ${GPU_BASE_IMAGE}" in content
+    assert (
+        "ghcr.io/astral-sh/uv:0.10.9@sha256:"
+        "10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82"
+        in content
+    )
     assert "requirements-gpu.lock" in content
     assert "uv pip sync" in content
     assert "--require-hashes" in content

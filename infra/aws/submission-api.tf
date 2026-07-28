@@ -28,7 +28,7 @@ resource "aws_lambda_function" "submission" {
     variables = {
       APPROVED_MANIFEST_PREFIXES = jsonencode(var.approved_manifest_prefixes)
       APPROVED_OUTPUT_PREFIXES   = jsonencode(var.approved_output_prefixes)
-      BATCH_JOB_DEFINITION_ARN   = local.batch_job_definition_arn
+      BATCH_JOB_DEFINITION_ARNS  = jsonencode(local.batch_job_definition_arns)
       BATCH_QUEUE_ARN            = aws_batch_job_queue.gpu.arn
       EXPECTED_GOOGLE_SUB        = google_service_account.orchestrator.unique_id
       LEDGER_TABLE_NAME          = aws_dynamodb_table.submission_ledger.name
@@ -45,7 +45,10 @@ resource "aws_lambda_function" "submission" {
         (
           local.batch_image_ready &&
           var.batch_queue_enabled &&
-          local.batch_job_definition_arn != ""
+          alltrue([
+            for pipeline in var.pipeline_allowlist :
+            try(local.batch_job_definition_arns[pipeline], "") != ""
+          ])
         )
       )
       error_message = "Submission requires an A5 image digest, enabled queue, and exact job-definition revision."

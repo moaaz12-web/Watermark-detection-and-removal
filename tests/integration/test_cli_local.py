@@ -418,6 +418,60 @@ def test_reference_batch_isolates_one_corrupt_item_across_five_items(
     assert background.closed == detection.closed == inpainting.closed == 1
 
 
+def test_inference_decodes_and_processes_only_one_item_at_a_time(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    manifest_path = write_local_manifest(tmp_path, item_count=5)
+    output_root = tmp_path / "output"
+    base_executor, background, detection, inpainting = reference_executor(config_path)
+    original_decode = cli_module.decode_image
+    active_images = 0
+    peak_active_images = 0
+
+    def tracked_decode(*args: object, **kwargs: object):
+        nonlocal active_images, peak_active_images
+        decoded, image = original_decode(*args, **kwargs)  # type: ignore[arg-type]
+        active_images += 1
+        peak_active_images = max(peak_active_images, active_images)
+        original_close = image.close
+
+        def tracked_close() -> None:
+            nonlocal active_images
+            active_images -= 1
+            original_close()
+
+        image.close = tracked_close  # type: ignore[method-assign]
+        return decoded, image
+
+    class OneItemExecutor:
+        def process_one(self, item):
+            assert active_images == 1
+            return base_executor.process_one(item)
+
+        def close(self) -> None:
+            base_executor.close()
+
+    monkeypatch.setattr(cli_module, "decode_image", tracked_decode)
+
+    exit_code = entrypoint(
+        inference_arguments(
+            manifest_path=manifest_path,
+            output_root=output_root,
+            config_path=config_path,
+            model_manifest_path=model_manifest_path,
+        ),
+        executor=OneItemExecutor(),  # type: ignore[arg-type]
+    )
+
+    assert exit_code == 0
+    assert peak_active_images == 1
+    assert active_images == 0
+    assert background.calls == detection.calls == inpainting.calls == 5
+    assert background.closed == detection.closed == inpainting.closed == 1
+
+
 def test_reference_batch_resumes_after_interruption_and_skips_completed_items(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -451,7 +505,7 @@ def test_reference_batch_resumes_after_interruption_and_skips_completed_items(
 
     assert entrypoint(arguments, executor=first_executor) == 6
     assert not (output_root / "tenant_17/wm_batch/_COMPLETE.json").exists()
-    assert first_background.calls == first_detection.calls == 5
+    assert first_background.calls == first_detection.calls == 2
     assert first_inpainting.calls == 2
     assert first_background.closed == first_detection.closed == first_inpainting.closed == 1
 

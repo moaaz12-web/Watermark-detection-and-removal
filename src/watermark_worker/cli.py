@@ -262,112 +262,115 @@ def run(
                 reused=written.reused,
             )
     else:
-        prepared: dict[str, PreparedInferenceItem] = {}
-        pending: list[PipelineItem] = []
-        for item in manifest.items:
-            started = time.monotonic()
-            source, source_identity = _read_item_source(
-                item=item,
-                manifest=manifest,
-                arguments=arguments,
-                storage=storage,
-            )
-            image_digest = sha256_bytes(source.data)
-            completed = writer.read_completed_item(
-                item_id=item.item_id,
-                output_prefix=item.output_prefix,
-                run=run_identity,
-                source=source_identity,
-                image_digest_sha256=image_digest,
-            )
-            if completed is not None:
-                record_item(
-                    result=completed.result,
-                    entry=completed.output_entry,
-                    reused=True,
+        active_executor: PipelineExecutor | None = None
+        try:
+            for item in manifest.items:
+                started = time.monotonic()
+                source, source_identity = _read_item_source(
+                    item=item,
+                    manifest=manifest,
+                    arguments=arguments,
+                    storage=storage,
                 )
-                continue
-            try:
-                decoded, image = decode_image(source.data, loaded_config.config.limits)
-            except ImageValidationError as exc:
-                result = _failed_image_result(
+                image_digest = sha256_bytes(source.data)
+                completed = writer.read_completed_item(
                     item_id=item.item_id,
-                    source=source_identity,
-                    run=run_identity,
-                    error_code=exc.error_code,
-                    processing_seconds=time.monotonic() - started,
-                )
-                written = writer.write_item(
-                    result=result,
                     output_prefix=item.output_prefix,
                     run=run_identity,
                     source=source_identity,
                     image_digest_sha256=image_digest,
-                    artifacts=[],
                 )
-                record_item(
-                    result=result,
-                    entry=OutputManifestEntry(
+                if completed is not None:
+                    record_item(
+                        result=completed.result,
+                        entry=completed.output_entry,
+                        reused=True,
+                    )
+                    continue
+                try:
+                    decoded, image = decode_image(source.data, loaded_config.config.limits)
+                except ImageValidationError as exc:
+                    result = _failed_image_result(
                         item_id=item.item_id,
-                        status=result.status,
-                        decision=result.decision,
-                        result=written.marker.result,
-                        marker=written.marker_ref,
-                    ),
-                    reused=written.reused,
-                )
-                continue
-            prepared[item.item_id] = PreparedInferenceItem(
-                manifest_item=item,
-                source=source_identity,
-                source_data=source.data,
-                decoded=decoded,
-                image=image,
-                started_at=started,
-            )
-            pending.append(PipelineItem(item_id=item.item_id, source_image=image))
+                        source=source_identity,
+                        run=run_identity,
+                        error_code=exc.error_code,
+                        processing_seconds=time.monotonic() - started,
+                    )
+                    written = writer.write_item(
+                        result=result,
+                        output_prefix=item.output_prefix,
+                        run=run_identity,
+                        source=source_identity,
+                        image_digest_sha256=image_digest,
+                        artifacts=[],
+                    )
+                    record_item(
+                        result=result,
+                        entry=OutputManifestEntry(
+                            item_id=item.item_id,
+                            status=result.status,
+                            decision=result.decision,
+                            result=written.marker.result,
+                            marker=written.marker_ref,
+                        ),
+                        reused=written.reused,
+                    )
+                    continue
 
-        def checkpoint(outcome: PipelineOutcome) -> None:
-            context = prepared[outcome.item_id]
-            result, artifacts = _inference_result(
-                outcome=outcome,
-                context=context,
-                run=run_identity,
-                writer=writer,
-                processing_seconds=time.monotonic() - context.started_at,
-            )
-            written = writer.write_item(
-                result=result,
-                output_prefix=context.manifest_item.output_prefix,
-                run=run_identity,
-                source=context.source,
-                image_digest_sha256=sha256_bytes(context.source_data),
-                artifacts=artifacts,
-            )
-            record_item(
-                result=result,
-                entry=OutputManifestEntry(
-                    item_id=result.item_id,
-                    status=result.status,
-                    decision=result.decision,
-                    result=written.marker.result,
-                    marker=written.marker_ref,
-                ),
-                reused=written.reused,
-            )
-
-        try:
-            if pending:
-                active_executor = executor or build_default_production_executor(
-                    config=loaded_config.config,
-                    manifest=loaded_models.manifest,
-                    storage=storage,
-                    work_root=_model_work_root(),
+                context = PreparedInferenceItem(
+                    manifest_item=item,
+                    source=source_identity,
+                    source_data=source.data,
+                    decoded=decoded,
+                    image=image,
+                    started_at=started,
                 )
-                active_executor.process(pending, on_terminal=checkpoint)
+                outcome: PipelineOutcome | None = None
+                try:
+                    if active_executor is None:
+                        active_executor = executor or build_default_production_executor(
+                            config=loaded_config.config,
+                            manifest=loaded_models.manifest,
+                            storage=storage,
+                            work_root=_model_work_root(),
+                        )
+                    outcome = active_executor.process_one(
+                        PipelineItem(item_id=item.item_id, source_image=image)
+                    )
+                    result, artifacts = _inference_result(
+                        outcome=outcome,
+                        context=context,
+                        run=run_identity,
+                        writer=writer,
+                        processing_seconds=time.monotonic() - started,
+                    )
+                    written = writer.write_item(
+                        result=result,
+                        output_prefix=item.output_prefix,
+                        run=run_identity,
+                        source=source_identity,
+                        image_digest_sha256=image_digest,
+                        artifacts=artifacts,
+                    )
+                    record_item(
+                        result=result,
+                        entry=OutputManifestEntry(
+                            item_id=result.item_id,
+                            status=result.status,
+                            decision=result.decision,
+                            result=written.marker.result,
+                            marker=written.marker_ref,
+                        ),
+                        reused=written.reused,
+                    )
+                finally:
+                    if outcome is not None and outcome.final_image is not None:
+                        outcome.final_image.close()
+                    image.close()
         finally:
-            for context in prepared.values():
-                context.image.close()
+            if active_executor is not None:
+                active_executor.close()
 
     output_manifest = OutputManifest(
         schema_version=1,
@@ -395,6 +398,7 @@ def run(
             output_bucket=loaded_config.config.storage.output_bucket,
         ),
         run=run_identity,
+        entries_prevalidated=manifest.pipeline_version == "watermark-bulk-v1",
     )
     emit_event(
         "job_completed",

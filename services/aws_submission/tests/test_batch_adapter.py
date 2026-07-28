@@ -66,10 +66,12 @@ def test_submit_uses_only_fixed_queue_definition_and_allowlisted_parameters() ->
     adapter = AwsBatchAdapter(
         client,
         queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
-        job_definition_arn=(
-            "arn:aws:batch:eu-north-1:154959837939:"
-            "job-definition/watermark-staging-worker:1"
-        ),
+        job_definition_arns={
+            "watermark-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job-definition/watermark-staging-worker:1"
+            )
+        },
     )
     request = SubmitRequest.model_validate(json.loads(FIXTURE.read_text(encoding="utf-8")))
 
@@ -84,9 +86,42 @@ def test_submit_uses_only_fixed_queue_definition_and_allowlisted_parameters() ->
         "MANIFEST_GENERATION": request.manifest_generation,
         "OUTPUT_MANIFEST_URI": request.output_manifest_uri,
         "PIPELINE_VERSION": request.pipeline_version,
+        "PIPELINE_CONFIG": "/app/configs/watermark-v1.yaml",
         "PROVIDER_ATTEMPT": "1",
     }
     assert "containerOverrides" not in client.submission
+
+
+def test_bulk_submission_selects_only_the_bulk_definition_and_config() -> None:
+    client = RecordingBatchClient()
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arns={
+            "watermark-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job-definition/watermark-staging-worker:3"
+            ),
+            "watermark-bulk-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job-definition/watermark-staging-worker-bulk:1"
+            ),
+        },
+    )
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload["pipelineVersion"] = "watermark-bulk-v1"
+    payload["requestSha256"] = "0" * 64
+    request = SubmitRequest.model_validate(payload)
+
+    adapter.submit(request, "watermark-wm-123", "f" * 64)
+
+    assert client.submission is not None
+    assert client.submission["jobDefinition"].endswith(
+        "/watermark-staging-worker-bulk:1"
+    )
+    assert client.submission["parameters"]["PIPELINE_CONFIG"] == (
+        "/app/configs/watermark-bulk-v1.yaml"
+    )
 
 
 @pytest.mark.parametrize(
@@ -110,10 +145,12 @@ def test_describe_verifies_identity_and_maps_every_batch_status(
     adapter = AwsBatchAdapter(
         client,
         queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
-        job_definition_arn=(
-            "arn:aws:batch:eu-north-1:154959837939:"
-            "job-definition/watermark-staging-worker:3"
-        ),
+        job_definition_arns={
+            "watermark-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job-definition/watermark-staging-worker:3"
+            )
+        },
     )
 
     result = adapter.describe(
@@ -139,10 +176,12 @@ def test_describe_rejects_missing_provider_job() -> None:
     adapter = AwsBatchAdapter(
         client,
         queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
-        job_definition_arn=(
-            "arn:aws:batch:eu-north-1:154959837939:"
-            "job-definition/watermark-staging-worker:3"
-        ),
+        job_definition_arns={
+            "watermark-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job-definition/watermark-staging-worker:3"
+            )
+        },
     )
 
     with pytest.raises(ProviderJobMissing):
@@ -171,10 +210,12 @@ def test_describe_rejects_job_outside_reserved_identity() -> None:
     adapter = AwsBatchAdapter(
         client,
         queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
-        job_definition_arn=(
-            "arn:aws:batch:eu-north-1:154959837939:"
-            "job-definition/watermark-staging-worker:3"
-        ),
+        job_definition_arns={
+            "watermark-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job-definition/watermark-staging-worker:3"
+            )
+        },
     )
 
     with pytest.raises(ProviderJobIdentityMismatch):

@@ -223,7 +223,7 @@ def _runtime() -> tuple[SubmissionService, str]:
         batch=AwsBatchAdapter(
             batch,
             queue_arn=os.environ.get("BATCH_QUEUE_ARN", ""),
-            job_definition_arn=os.environ.get("BATCH_JOB_DEFINITION_ARN", ""),
+            job_definition_arns=_json_string_mapping("BATCH_JOB_DEFINITION_ARNS"),
         ),
         policy=policy,
         submission_enabled=submission_enabled,
@@ -239,6 +239,23 @@ def _json_string_tuple(name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not value or any(not isinstance(item, str) for item in value):
         raise RuntimeError(f"{name} must be a non-empty JSON string array")
     return tuple(value)
+
+
+def _json_string_mapping(name: str) -> dict[str, str]:
+    value = json.loads(_required_environment(name))
+    if (
+        not isinstance(value, dict)
+        or not value
+        or any(
+            not isinstance(key, str)
+            or not key
+            or not isinstance(item, str)
+            or not item
+            for key, item in value.items()
+        )
+    ):
+        raise RuntimeError(f"{name} must be a non-empty JSON string mapping")
+    return value
 
 
 def _required_environment(name: str) -> str:

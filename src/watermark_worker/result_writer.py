@@ -251,9 +251,11 @@ class ResultWriter:
         output_manifest: OutputManifest,
         output_prefix: str,
         run: RunIdentity,
+        entries_prevalidated: bool = False,
     ) -> JobWriteOutcome:
         self._validate_job_request(output_manifest=output_manifest, run=run)
-        self._validate_output_entries(output_manifest)
+        if not entries_prevalidated:
+            self._validate_output_entries(output_manifest)
         marker_uri = self.artifact_uri(output_prefix, "_COMPLETE.json")
         existing_marker = self._read_job_marker(marker_uri)
         if existing_marker is not None:
@@ -280,7 +282,8 @@ class ResultWriter:
                 "wmObjectKind": "output-manifest",
             },
         )
-        self._validate_output_entries(output_manifest)
+        if not entries_prevalidated:
+            self._validate_output_entries(output_manifest)
         marker = JobCompleteMarker(
             schema_version=1,
             job_id=run.job_id,
