@@ -1027,7 +1027,7 @@ project builds the Linux AMD64 image, reuses a BuildKit registry cache in
 release tag to `watermark-staging-worker`. No GPU or EC2 Batch capacity is created by the build.
 Use a new release tag for every attempt and record the resulting digest. Exact monitoring and
 failure-handling commands are in the
-[A7 manual operator runbook](04-a7-manual-operator-runbook.md).
+[worker image deployment and GPU acceptance runbook](aws-worker-image-deployment-and-gpu-acceptance-runbook.md).
 
 Manual acceptance submission:
 
@@ -2231,8 +2231,8 @@ there are no active Batch jobs, EC2 instances, or EBS volumes.
 Operational ownership after this attempt is intentionally split. Codex fixes and locally verifies
 reported errors only. The operator explicitly starts and monitors the remote image build, performs
 Terraform deployment, authentication, one-job submission, monitoring, and cleanup using the
-[A7 manual operator runbook](04-a7-manual-operator-runbook.md). A new GPU attempt requires a fresh
-job ID and explicit operator action.
+[worker image deployment and GPU acceptance runbook](aws-worker-image-deployment-and-gpu-acceptance-runbook.md).
+A new GPU attempt requires a fresh job ID and explicit operator action.
 
 #### A7.1 Pre-submit safety check
 

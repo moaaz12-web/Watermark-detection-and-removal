@@ -1,5 +1,37 @@
 @/home/maaz/.codex/RTK.md
 
+# Watermark System Context Index
+
+Before working on this repository, read the authoritative agent guide:
+
+[Hybrid Watermark System Agent Guide](docs/productionization/00-hybrid-watermark-system-agent-guide.md)
+
+Always read its
+[current-state and freshness rules](docs/productionization/00-hybrid-watermark-system-agent-guide.md#2-current-state-and-freshness-rules)
+and then jump to the relevant section:
+
+| Task | Guide section or runbook |
+| --- | --- |
+| Understand repositories and ownership | [Repository map](docs/productionization/00-hybrid-watermark-system-agent-guide.md#3-repository-map-and-ownership) |
+| Understand the end-to-end flow | [Whole-system architecture](docs/productionization/00-hybrid-watermark-system-agent-guide.md#4-whole-system-architecture) |
+| Find GCP services or connect safely | [GCP service inventory](docs/productionization/00-hybrid-watermark-system-agent-guide.md#6-gcp-service-inventory) |
+| Find AWS services or connect safely | [AWS service inventory](docs/productionization/00-hybrid-watermark-system-agent-guide.md#7-aws-service-inventory) |
+| Understand authentication and trust | [Authentication and connection paths](docs/productionization/00-hybrid-watermark-system-agent-guide.md#8-authentication-and-connection-paths) |
+| Understand FastAPI routes and states | [Public FastAPI API](docs/productionization/00-hybrid-watermark-system-agent-guide.md#9-public-fastapi-watermark-api) and [job lifecycle](docs/productionization/00-hybrid-watermark-system-agent-guide.md#10-job-lifecycle) |
+| Build or deploy code/infrastructure | [Build and deployment paths](docs/productionization/00-hybrid-watermark-system-agent-guide.md#12-build-deploy-and-infrastructure-paths) |
+| Build, deploy, or accept an AWS GPU worker image | [AWS worker image deployment and GPU acceptance runbook](docs/productionization/aws-worker-image-deployment-and-gpu-acceptance-runbook.md) |
+| Inspect logs or diagnose a job | [Safe observability](docs/productionization/00-hybrid-watermark-system-agent-guide.md#13-safe-observability) |
+| Enable or disable normal operation | [Operational modes](docs/productionization/00-hybrid-watermark-system-agent-guide.md#14-operational-modes-and-cost-behavior), then [operational-mode runbook](docs/productionization/09-operational-mode-switch-runbook.md) |
+| Verify no GPU is active | [Safety and zero-GPU verification](docs/productionization/00-hybrid-watermark-system-agent-guide.md#15-safety-and-zero-gpu-verification) |
+| Work on 10,000-image scale or performance | [Performance and scale facts](docs/productionization/00-hybrid-watermark-system-agent-guide.md#16-performance-and-scale-facts) |
+| Find the exact owner/runbook for any task | [Task-routing index](docs/productionization/00-hybrid-watermark-system-agent-guide.md#17-task-routing-index) |
+| Decide whether an older document is authoritative | [Document authority](docs/productionization/00-hybrid-watermark-system-agent-guide.md#18-document-authority-and-historical-notes) |
+
+Current location warning: GCP is in `us-central1`; the live AWS deployment is in
+`eu-north-1`. The Ohio migration document is a proposal and has not been executed. Never act on a
+recorded resource state without refreshing it first, and never print broad Cloud Run or Lambda
+environment dumps because they may contain secrets.
+
 # AWS Guidance
 
 - Prefer the AWS MCP Server for AWS interactions — it provides sandboxed
@@ -26,3 +58,9 @@
   NOT hit the Secrets Manager Agent daemon directly. MUST use
   `{{resolve:secretsmanager:secret-id:SecretString:json-key}}` with
   `asm-exec` so the secret resolves at runtime without entering context.
+
+
+# Credentials to use when needing to login as a user and use the watermark system:
+Email: moaaz@hotmail.com
+Password: moaaz@hotmail.com
+Store id: 2 (current active store)

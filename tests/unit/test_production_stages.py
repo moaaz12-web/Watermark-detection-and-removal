@@ -148,7 +148,5 @@ def test_inpainting_stage_uses_original_source_and_notebook_mask_defaults() -> N
     assert runtime.received_mask is not None
     assert set(runtime.received_mask.get_flattened_data()) == {255}
     assert output.final_image.getpixel((0, 0)) == (0, 0, 255)
-    assert [artifact.relative_name for artifact in output.artifacts] == [
-        "inpainted/lama_raw_output.png"
-    ]
+    assert output.artifacts == ()
     assert runtime.closed is True

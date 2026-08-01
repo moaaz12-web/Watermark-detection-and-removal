@@ -202,11 +202,7 @@ class ProductionInpaintingStage:
             raise ModelValidationError("LaMa output dimensions do not match the source image")
         return InpaintingOutput(
             final_image=result,
-            artifacts=(
-                StageArtifact(
-                    "inpainted/lama_raw_output.png", _png_bytes(result), "image/png"
-                ),
-            ),
+            artifacts=(),
         )
 
     def close(self) -> None:

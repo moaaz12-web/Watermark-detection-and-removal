@@ -20,3 +20,4 @@ services/aws_submission/dist/
 !.env.example
 *.key
 *.pem
+artifacts/
