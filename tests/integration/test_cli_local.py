@@ -232,6 +232,42 @@ def test_local_validate_only_writes_terminal_results_without_final_uri(tmp_path:
     )
 
 
+def test_local_run_emits_versioned_item_and_job_timing_events(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    manifest_path = write_local_manifest(tmp_path, item_count=1)
+    output_root = tmp_path / "output"
+
+    assert entrypoint(
+        inference_arguments(
+            manifest_path=manifest_path,
+            output_root=output_root,
+            config_path=config_path,
+            model_manifest_path=model_manifest_path,
+        ),
+        executor=reference_executor(config_path)[0],
+    ) == 0
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    item_timing = next(
+        event for event in events if event["eventType"] == "watermark_worker_item_timing"
+    )
+    job_timing = next(
+        event for event in events if event["eventType"] == "watermark_worker_job_timing"
+    )
+    assert item_timing["schemaVersion"] == 1
+    assert item_timing["itemId"] == "asset_0"
+    assert item_timing["sourceBytes"] > 0
+    assert item_timing["artifactCount"] > 0
+    assert item_timing["itemWallMilliseconds"] >= 0
+    assert item_timing["inputQueueWaitMilliseconds"] is None
+    assert item_timing["outputQueueWaitMilliseconds"] is None
+    assert job_timing["schemaVersion"] == 1
+    assert job_timing["totalItems"] == 1
+    assert job_timing["succeededItems"] == 1
+
+
 def test_local_reference_inference_writes_the_documented_artifact_contract(
     tmp_path: Path,
 ) -> None:

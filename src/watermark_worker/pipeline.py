@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
 from PIL import Image
@@ -14,6 +14,7 @@ from watermark_worker.stages.safety_gate import (
     SafetyGateEvaluation,
     evaluate_safety_gate,
 )
+from watermark_worker.timing import ItemTimingRecorder, PipelineTiming
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ class PipelineOutcome:
     error_code: ErrorCode | None = None
     error_message: str | None = None
     safety_gate: SafetyGateEvaluation | None = None
+    timing: PipelineTiming = field(default_factory=PipelineTiming)
 
 
 class PipelineExecutor:
@@ -102,12 +104,14 @@ class PipelineExecutor:
         inpainting: InpaintingStage,
         safety_gate: SafetyGateConfig,
         on_stage_lifecycle: Callable[[StageLifecycleEvent], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.background_removal = background_removal
         self.detection = detection
         self.inpainting = inpainting
         self.safety_gate = safety_gate
         self.on_stage_lifecycle = on_stage_lifecycle
+        self._clock = clock
         self._opened_stages: list[tuple[str, PipelineStage]] = []
         self._closed = False
 
@@ -149,32 +153,38 @@ class PipelineExecutor:
 
     def process_one(self, item: PipelineItem) -> PipelineOutcome:
         self.initialize()
+        timing = ItemTimingRecorder(clock=self._clock)
         try:
-            background = self.background_removal.run(item.source_image)
+            with timing.measure("backgroundRemovalMilliseconds"):
+                background = self.background_removal.run(item.source_image)
         except Exception as exc:
             return _failed_outcome(
                 item=item,
                 error_code=ErrorCode.DETECTOR_FAILED,
                 error=exc,
+                timing=timing.snapshot(),
             )
 
         try:
             try:
-                detection = self.detection.run(background.detector_image)
+                with timing.measure("detectionMilliseconds"):
+                    detection = self.detection.run(background.detector_image)
             except Exception as exc:
                 return _failed_outcome(
                     item=item,
                     error_code=ErrorCode.DETECTOR_FAILED,
                     error=exc,
+                    timing=timing.snapshot(),
                 )
         finally:
             background.detector_image.close()
 
-        evaluation = evaluate_safety_gate(
-            detection_masks=list(detection.detection_masks),
-            foreground_mask=background.foreground_mask,
-            config=self.safety_gate,
-        )
+        with timing.measure("safetyGateMilliseconds"):
+            evaluation = evaluate_safety_gate(
+                detection_masks=list(detection.detection_masks),
+                foreground_mask=background.foreground_mask,
+                config=self.safety_gate,
+            )
         artifacts = [*background.artifacts, *detection.artifacts]
         if evaluation.approved_mask is not None:
             artifacts.append(
@@ -189,6 +199,7 @@ class PipelineExecutor:
             detection_count=len(detection.detection_masks),
             evaluation=evaluation,
             artifacts=tuple(artifacts),
+            timing=timing.snapshot(),
         )
         if (
             evaluation.decision is not SafetyDecision.ALLOWED
@@ -198,12 +209,14 @@ class PipelineExecutor:
 
         try:
             # The original source is intentionally the only inpainting input.
-            inpainted = self.inpainting.run(item.source_image, evaluation.approved_mask)
+            with timing.measure("inpaintingMilliseconds"):
+                inpainted = self.inpainting.run(item.source_image, evaluation.approved_mask)
         except Exception as exc:
             return _failed_outcome(
                 item=item,
                 error_code=ErrorCode.INPAINTING_FAILED,
                 error=exc,
+                timing=timing.snapshot(),
             )
         return PipelineOutcome(
             item_id=gated.item_id,
@@ -215,6 +228,7 @@ class PipelineExecutor:
             final_image=inpainted.final_image,
             combined_mask=evaluation.approved_mask,
             safety_gate=gated.safety_gate,
+            timing=timing.snapshot(),
         )
 
     def close(self) -> None:
@@ -233,14 +247,14 @@ class PipelineExecutor:
             raise first_error
 
     def _initialize_stage(self, name: str, stage: PipelineStage) -> None:
-        started = time.monotonic()
+        started = self._clock()
         _initialize_if_supported(stage)
-        self._record_stage_event(name, "initialized", time.monotonic() - started)
+        self._record_stage_event(name, "initialized", self._clock() - started)
 
     def _close_stage(self, name: str, stage: PipelineStage) -> None:
-        started = time.monotonic()
+        started = self._clock()
         stage.close()
-        self._record_stage_event(name, "released", time.monotonic() - started)
+        self._record_stage_event(name, "released", self._clock() - started)
 
     def _record_stage_event(
         self,
@@ -270,6 +284,7 @@ def _outcome_for_gate(
     detection_count: int,
     evaluation: SafetyGateEvaluation,
     artifacts: tuple[StageArtifact, ...],
+    timing: PipelineTiming,
 ) -> PipelineOutcome:
     if evaluation.decision is SafetyDecision.ALLOWED:
         return PipelineOutcome(
@@ -281,6 +296,7 @@ def _outcome_for_gate(
             artifacts=artifacts,
             combined_mask=evaluation.approved_mask,
             safety_gate=evaluation,
+            timing=timing,
         )
     if evaluation.decision is SafetyDecision.NO_WATERMARK:
         return PipelineOutcome(
@@ -291,6 +307,7 @@ def _outcome_for_gate(
             warning_codes=evaluation.warning_codes,
             artifacts=artifacts,
             safety_gate=evaluation,
+            timing=timing,
         )
     return PipelineOutcome(
         item_id=item_id,
@@ -304,11 +321,16 @@ def _outcome_for_gate(
         warning_codes=evaluation.warning_codes,
         artifacts=artifacts,
         safety_gate=evaluation,
+        timing=timing,
     )
 
 
 def _failed_outcome(
-    *, item: PipelineItem, error_code: ErrorCode, error: Exception
+    *,
+    item: PipelineItem,
+    error_code: ErrorCode,
+    error: Exception,
+    timing: PipelineTiming,
 ) -> PipelineOutcome:
     return PipelineOutcome(
         item_id=item.item_id,
@@ -318,4 +340,5 @@ def _failed_outcome(
         warning_codes=[],
         error_code=error_code,
         error_message=str(error),
+        timing=timing,
     )

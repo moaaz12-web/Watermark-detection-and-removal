@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -44,10 +45,27 @@ class ArtifactPayload:
 
 
 @dataclass(frozen=True)
+class ItemWriteTiming:
+    artifact_write_milliseconds: float = 0.0
+    result_write_milliseconds: float = 0.0
+    marker_write_milliseconds: float = 0.0
+    artifact_count: int = 0
+    artifact_bytes: int = 0
+    gcs_write_count: int = 0
+
+
+@dataclass(frozen=True)
+class CompletionLookupTiming:
+    completion_lookup_milliseconds: float = 0.0
+    gcs_read_count: int = 0
+
+
+@dataclass(frozen=True)
 class ItemWriteOutcome:
     marker: ItemCompleteMarker
     marker_ref: ObjectRef
     reused: bool
+    timing: ItemWriteTiming = ItemWriteTiming()
 
 
 @dataclass(frozen=True)
@@ -55,6 +73,7 @@ class CompletedItem:
     result: ItemResult
     marker: ItemCompleteMarker
     marker_ref: ObjectRef
+    timing: CompletionLookupTiming = CompletionLookupTiming()
 
     @property
     def output_entry(self) -> OutputManifestEntry:
@@ -78,8 +97,22 @@ class JobWriteOutcome:
 class ResultWriter:
     """Writes immutable item and job results, with `_COMPLETE.json` written last."""
 
-    def __init__(self, storage: StorageAdapter) -> None:
+    def __init__(
+        self, storage: StorageAdapter, *, clock: Callable[[], float] = time.monotonic
+    ) -> None:
         self.storage = storage
+        self._clock = clock
+        self._read_count = 0
+        self._last_operation_read_count = 0
+        self._last_completion_lookup_timing = CompletionLookupTiming()
+
+    @property
+    def last_completion_lookup_timing(self) -> CompletionLookupTiming:
+        return self._last_completion_lookup_timing
+
+    @property
+    def last_operation_read_count(self) -> int:
+        return self._last_operation_read_count
 
     def artifact_uri(self, output_prefix: str, relative_name: str) -> str:
         return self.storage.join_uri(output_prefix, relative_name)
@@ -93,9 +126,15 @@ class ResultWriter:
         source: InputIdentity,
         image_digest_sha256: str,
     ) -> CompletedItem | None:
+        started = self._clock()
+        self._read_count = 0
         marker_uri = self.artifact_uri(output_prefix, "_COMPLETE.json")
         existing_marker = self._read_item_marker(marker_uri)
         if existing_marker is None:
+            self._last_completion_lookup_timing = CompletionLookupTiming(
+                completion_lookup_milliseconds=_elapsed_milliseconds(self._clock, started),
+                gcs_read_count=self._read_count,
+            )
             return None
         marker, marker_ref = existing_marker
         self._validate_item_marker_identity(
@@ -163,7 +202,16 @@ class ResultWriter:
         self._validate_result_artifact_link(
             result.combined_mask_uri, "masks/combined_mask.png", marker.artifacts
         )
-        return CompletedItem(result=result, marker=marker, marker_ref=marker_ref)
+        self._last_completion_lookup_timing = CompletionLookupTiming(
+            completion_lookup_milliseconds=_elapsed_milliseconds(self._clock, started),
+            gcs_read_count=self._read_count,
+        )
+        return CompletedItem(
+            result=result,
+            marker=marker,
+            marker_ref=marker_ref,
+            timing=self._last_completion_lookup_timing,
+        )
 
     def write_item(
         self,
@@ -175,6 +223,7 @@ class ResultWriter:
         image_digest_sha256: str,
         artifacts: list[ArtifactPayload],
     ) -> ItemWriteOutcome:
+        self._read_count = 0
         self._validate_item_request(result=result, run=run, source=source)
         marker_uri = self.artifact_uri(output_prefix, "_COMPLETE.json")
         existing_marker = self._read_item_marker(marker_uri)
@@ -189,11 +238,13 @@ class ResultWriter:
                 artifacts=artifacts,
                 output_prefix=output_prefix,
             )
+            self._last_operation_read_count = self._read_count
             return ItemWriteOutcome(
                 marker=existing_marker[0], marker_ref=existing_marker[1], reused=True
             )
 
         artifact_refs: dict[str, ObjectRef] = {}
+        artifact_started = self._clock()
         for artifact in artifacts:
             uri = self.artifact_uri(output_prefix, artifact.relative_name)
             artifact_refs[artifact.relative_name] = self._create_or_validate(
@@ -207,9 +258,11 @@ class ResultWriter:
                     **dict(artifact.metadata or {}),
                 },
             )
+        artifact_write_milliseconds = _elapsed_milliseconds(self._clock, artifact_started)
 
         result_uri = self.artifact_uri(output_prefix, "result.json")
         result_data = _canonical_json(result)
+        result_started = self._clock()
         result_ref = self._create_or_validate(
             uri=result_uri,
             data=result_data,
@@ -219,6 +272,7 @@ class ResultWriter:
                 "wmObjectKind": "result",
             },
         )
+        result_write_milliseconds = _elapsed_milliseconds(self._clock, result_started)
         marker = ItemCompleteMarker(
             schema_version=1,
             job_id=run.job_id,
@@ -234,6 +288,7 @@ class ResultWriter:
             image_digest_sha256=image_digest_sha256,
             completed_at=datetime.now(UTC),
         )
+        marker_started = self._clock()
         marker_ref = self._create_or_validate(
             uri=marker_uri,
             data=_canonical_json(marker),
@@ -243,7 +298,21 @@ class ResultWriter:
                 "wmObjectKind": "item-complete",
             },
         )
-        return ItemWriteOutcome(marker=marker, marker_ref=marker_ref, reused=False)
+        marker_write_milliseconds = _elapsed_milliseconds(self._clock, marker_started)
+        self._last_operation_read_count = self._read_count
+        return ItemWriteOutcome(
+            marker=marker,
+            marker_ref=marker_ref,
+            reused=False,
+            timing=ItemWriteTiming(
+                artifact_write_milliseconds=artifact_write_milliseconds,
+                result_write_milliseconds=result_write_milliseconds,
+                marker_write_milliseconds=marker_write_milliseconds,
+                artifact_count=len(artifacts),
+                artifact_bytes=sum(len(artifact.data) for artifact in artifacts),
+                gcs_write_count=len(artifacts) + 2,
+            ),
+        )
 
     def write_job(
         self,
@@ -398,7 +467,7 @@ class ResultWriter:
 
     def _read_item_marker(self, uri: str) -> tuple[ItemCompleteMarker, ObjectRef] | None:
         try:
-            stored = self.storage.read_bytes(uri)
+            stored = self._read_bytes(uri)
         except StorageNotFoundError:
             return None
         try:
@@ -408,7 +477,7 @@ class ResultWriter:
 
     def _read_job_marker(self, uri: str) -> tuple[JobCompleteMarker, ObjectRef] | None:
         try:
-            stored = self.storage.read_bytes(uri)
+            stored = self._read_bytes(uri)
         except StorageNotFoundError:
             return None
         try:
@@ -594,9 +663,13 @@ class ResultWriter:
 
     def _read_required(self, uri: str, identity: str) -> StoredObject:
         try:
-            return self.storage.read_bytes(uri)
+            return self._read_bytes(uri)
         except StorageNotFoundError as exc:
             raise StaleOutputError(f"{identity} is missing: {uri}") from exc
+
+    def _read_bytes(self, uri: str) -> StoredObject:
+        self._read_count += 1
+        return self.storage.read_bytes(uri)
 
     @staticmethod
     def _validate_existing_object(
@@ -656,6 +729,10 @@ def _canonical_json(model: BaseModel | object) -> bytes:
     else:
         payload = model
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _elapsed_milliseconds(clock: Callable[[], float], started: float) -> float:
+    return round(max(0.0, clock() - started) * 1000.0, 3)
 
 
 def _same_output_manifest_identity(left: OutputManifest, right: OutputManifest) -> bool:

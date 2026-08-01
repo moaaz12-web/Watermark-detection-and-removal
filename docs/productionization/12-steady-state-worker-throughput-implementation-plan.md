@@ -1,6 +1,6 @@
 # Steady-State Worker Throughput Implementation Plan
 
-Status: Implementation-ready plan; no runtime changes in this document have been executed.
+Status: Phase A (T1/T2) implemented locally; measurement-image checkpoint A is pending.
 
 Last updated: 2026-08-02
 
@@ -18,6 +18,13 @@ This plan covers the first four measured optimizations for the AWS GPU worker:
 The goal is to improve the steady-state interval from first completed image to final completed
 image without weakening safety decisions, immutable GCS identities, retry behavior, or scale-to-zero
 operation.
+
+Implementation note (2026-08-02): T1/T2 are implemented on the `watermark_pipeline` branch. The
+worker now records monotonic stage spans, emits one safe versioned item timing event per terminal
+item, and emits one aggregate job timing event after the durable job marker. The persisted result,
+item marker, and output-manifest schemas are unchanged. The next checkpoint is a deployed
+measurement-only image and the deterministic timing analysis from T2a; CUDA, prefetch, and artifact
+optimization work remains intentionally unstarted.
 
 This is a worker-image project. It does not require a FastAPI or Cloud Run deployment unless the
 accepted implementation changes an application-facing contract. The intended design below avoids
@@ -243,6 +250,8 @@ immutable worker image digest that can be rolled back independently.
 
 ### Task T1: Add internal timing primitives
 
+**Status:** Implemented locally; included in the pending measurement checkpoint.
+
 **Description:** Add a small internal timing model that records monotonic named spans without
 logging from model/runtime classes. The CLI owns final event emission.
 
@@ -271,6 +280,8 @@ logging from model/runtime classes. The CLI owns final event emission.
 **Estimated scope:** Medium.
 
 ### Task T2: Instrument CLI input, output, and job phases
+
+**Status:** Implemented locally; included in the pending measurement checkpoint.
 
 **Description:** Time source access, checksum/replay work, decode, result assembly, item writes, and
 job finalization. Extend writer return values with internal write metrics or add an internal writer
@@ -303,6 +314,8 @@ timing callback. Emit the two versioned events defined in Section 6.
 **Estimated scope:** Medium.
 
 ### Task T2a: Add deterministic timing analysis
+
+**Status:** Not started. This is the next implementation slice after the telemetry checkpoint.
 
 **Description:** Add a script that reads exported CloudWatch JSON events and calculates the baseline
 table without network access.

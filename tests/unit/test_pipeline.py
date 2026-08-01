@@ -337,6 +337,42 @@ def test_executor_reports_stage_initialization_and_release() -> None:
     assert all(event.duration_seconds >= 0 for event in events)
 
 
+def test_executor_records_per_item_stage_timings() -> None:
+    clock = iter(
+        [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.9,
+            0.9,
+            1.3,
+            1.3,
+            1.9,
+            1.9,
+            2.1,
+        ]
+    )
+    executor = PipelineExecutor(
+        background_removal=BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1))),
+        detection=DetectorStage((mask((3, 3)),)),
+        inpainting=InpaintingStage(),
+        safety_gate=gate_config(),
+        clock=lambda: next(clock),
+    )
+
+    outcome = executor.process_one(
+        PipelineItem(item_id="asset_123", source_image=source_image())
+    )
+
+    assert outcome.timing.background_removal_milliseconds == 900.0
+    assert outcome.timing.detection_milliseconds == 400.0
+    assert outcome.timing.safety_gate_milliseconds == 600.0
+
+
 def test_unverified_gate_blocks_without_calling_inpainting() -> None:
     inpainting = InpaintingStage()
     executor = PipelineExecutor(

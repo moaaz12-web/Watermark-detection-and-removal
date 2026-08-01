@@ -114,6 +114,10 @@ def test_item_marker_is_written_after_artifacts_and_result(tmp_path: Path) -> No
     assert storage.created[-2].endswith("/result.json")
     assert outcome.marker.artifacts["masks/combined_mask.png"].checksum_sha256
     assert outcome.reused is False
+    assert outcome.timing.artifact_count == 1
+    assert outcome.timing.artifact_bytes == 4
+    assert outcome.timing.gcs_write_count == 3
+    assert outcome.timing.artifact_write_milliseconds >= 0
 
 
 def test_compatible_item_replay_validates_and_reuses_without_writes(tmp_path: Path) -> None:
@@ -167,6 +171,8 @@ def test_completed_item_probe_returns_validated_output_entry_without_writes(
     assert completed.output_entry.item_id == "asset_123"
     assert completed.output_entry.result == completed.marker.result
     assert storage.created == []
+    assert completed.timing.gcs_read_count == 4
+    assert completed.timing.completion_lookup_milliseconds >= 0
 
 
 def test_completed_item_probe_returns_none_when_marker_is_missing(tmp_path: Path) -> None:
