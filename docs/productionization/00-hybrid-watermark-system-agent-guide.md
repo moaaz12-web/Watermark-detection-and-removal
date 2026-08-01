@@ -1013,7 +1013,9 @@ Read:
 - [08-10000-image-bulk-processing-plan.md](08-10000-image-bulk-processing-plan.md) for the bulk
   architecture and implemented contract; and
 - [11-15-product-timing-baseline-and-optimization.md](11-15-product-timing-baseline-and-optimization.md)
-  for the timing evidence and optimization order.
+  for the timing evidence and optimization order; and
+- [12-steady-state-worker-throughput-implementation-plan.md](12-steady-state-worker-throughput-implementation-plan.md)
+  for the implementation-ready worker timing, CUDA-kernel, bounded-I/O, and artifact-overhead plan.
 
 ## 17. Task-routing index
 
@@ -1035,7 +1037,7 @@ Read:
 | Diagnose AWAITING_OUTPUT | Backend reconciler and output validation | Batch state, GCS output manifest, PostgreSQL |
 | Verify or shut down GPU capacity | [09-operational-mode-switch-runbook.md](09-operational-mode-switch-runbook.md), Sections 10-11 | Scheduler, Batch, EC2 |
 | Plan Stockholm to Ohio migration | [10-aws-gpu-regional-migration-plan.md](10-aws-gpu-regional-migration-plan.md) | New isolated regional Terraform state |
-| Optimize throughput or latency | [11-15-product-timing-baseline-and-optimization.md](11-15-product-timing-baseline-and-optimization.md) | Instrumentation, region, preparer, worker |
+| Optimize throughput or latency | [11-15-product-timing-baseline-and-optimization.md](11-15-product-timing-baseline-and-optimization.md), then [12-steady-state-worker-throughput-implementation-plan.md](12-steady-state-worker-throughput-implementation-plan.md) for the first four worker tasks | Instrumentation, region, preparer, worker |
 | Add or change frontend watermark UI | Existing frontend bulk-scan patterns and Postman collection | Frontend repo and FastAPI only |
 
 ## 18. Document authority and historical notes
@@ -1054,6 +1056,7 @@ Read:
 | `09-operational-mode-switch-runbook.md` | Authoritative operational versus development-safe switching | Verify active work before closing gates |
 | `10-aws-gpu-regional-migration-plan.md` | Proposed Stockholm-to-Ohio migration | Proposal only; current AWS remains Stockholm |
 | `11-15-product-timing-baseline-and-optimization.md` | Measured latency and optimization priorities | Based on one 14-image execution |
+| `12-steady-state-worker-throughput-implementation-plan.md` | Implementation order and acceptance gates for worker timing, CUDA extension, bounded I/O overlap, and artifact overhead | Plan only until checkpoint commits and benchmark evidence are recorded |
 
 When documentation and live state differ:
 
