@@ -21,6 +21,7 @@ and then jump to the relevant section:
 | Build or deploy code/infrastructure | [Build and deployment paths](docs/productionization/00-hybrid-watermark-system-agent-guide.md#12-build-deploy-and-infrastructure-paths) |
 | Build, deploy, or accept an AWS GPU worker image | [AWS worker image deployment and GPU acceptance runbook](docs/productionization/aws-worker-image-deployment-and-gpu-acceptance-runbook.md) |
 | Inspect logs or diagnose a job | [Safe observability](docs/productionization/00-hybrid-watermark-system-agent-guide.md#13-safe-observability) |
+| Analyze a completed job's timings from its `wm_...` ID | [Job metrics and timing-analysis runbook](docs/productionization/15-job-metrics-and-timing-analysis-runbook.md) |
 | Enable or disable normal operation | [Operational modes](docs/productionization/00-hybrid-watermark-system-agent-guide.md#14-operational-modes-and-cost-behavior), then [operational-mode runbook](docs/productionization/09-operational-mode-switch-runbook.md) |
 | Verify no GPU is active | [Safety and zero-GPU verification](docs/productionization/00-hybrid-watermark-system-agent-guide.md#15-safety-and-zero-gpu-verification) |
 | Work on 10,000-image scale or performance | [Performance and scale facts](docs/productionization/00-hybrid-watermark-system-agent-guide.md#16-performance-and-scale-facts) |
