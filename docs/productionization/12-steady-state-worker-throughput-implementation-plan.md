@@ -106,7 +106,7 @@ The safe target is a three-lane bounded pipeline. It overlaps CPU/network work b
 GPU owner.
 
 ```text
-Input lane (depth 1, benchmark depth 2)
+Input lane (N+1 only)
   GCS read -> checksum -> replay lookup -> decode
                         |
                         v
@@ -114,7 +114,7 @@ GPU lane (exactly one item)
   RMBG -> detectors -> SAM 2 -> safety -> optional LaMa
                         |
                         v
-Output lane (depth 1, benchmark depth 2)
+Output lane (N+1 only)
   serialize required payloads -> upload artifacts -> result -> marker
 ```
 
@@ -345,6 +345,11 @@ table without network access.
 
 ## 9. Phase B: bounded I/O overlap
 
+**Approved scope:** Implement only N+1 overlap: at most one prepared future input and one pending
+durable output write. Do not add a configurable queue depth, depth-two benchmark, multi-item GPU
+execution, or concurrent artifact uploads in this phase. The detailed execution plan is
+[13-n-plus-one-io-overlap-implementation-plan.md](13-n-plus-one-io-overlap-implementation-plan.md).
+
 ### Task T4: Extract a testable prepared-input boundary
 
 **Description:** Move source read, checksum, completed-item lookup, and decode into a function that
@@ -377,13 +382,12 @@ touch CUDA or the shared pipeline executor.
 
 ### Task T4a: Add bounded input prefetch
 
-**Description:** Add one input worker and a bounded queue. Default depth is 1; permit a strictly
-validated depth of 2 for benchmarks. The main thread consumes manifest order and remains the only
-GPU executor owner.
+**Description:** Add one input worker and exactly one prepared-future slot. The main thread
+consumes manifest order and remains the only GPU executor owner.
 
 **Acceptance criteria:**
 
-- At most the configured number of decoded future items is resident.
+- At most one decoded future item is resident in addition to the current GPU item.
 - No future is accumulated for all 10,000 manifest items.
 - Prefetch stops, drains, and closes owned objects on the first fatal job error.
 - Replayed items bypass GPU execution without disturbing manifest order.
@@ -406,7 +410,7 @@ GPU executor owner.
 
 **Estimated scope:** Medium.
 
-### Task T5: Add one-item output overlap
+### Task T5: Add N+1 output overlap
 
 **Description:** After inference and required serialization have produced immutable byte payloads,
 submit the previous item's write to one output worker while the GPU processes the next item. Begin
@@ -441,9 +445,9 @@ thread.
 
 **Estimated scope:** Medium.
 
-### Checkpoint B: I/O-overlap benchmark
+### Checkpoint B: N+1 I/O-overlap benchmark
 
-- Benchmark synchronous, input-depth-1, input-depth-2, and input-depth-2/output-depth-1 modes.
+- Benchmark synchronous, N+1 input prefetch, and N+1 input-plus-output overlap.
 - Use three attempts per mode and the same immutable source set.
 - Compare source-read, input-wait, GPU-stage, output-wait, artifact-write, total item p50/p95,
   throughput, system RAM, and GPU memory.
@@ -681,7 +685,7 @@ Rollback must be possible at every checkpoint:
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | Timing code changes hot paths | Measurement distorts baseline | One event per item, monotonic in-memory spans, Checkpoint A overhead gate |
-| Prefetch increases memory | Worker OOM | Depth 1 default, depth 2 maximum until measured, explicit ownership/close tests |
+| Prefetch increases memory | Worker OOM | Fixed N+1 bound, explicit ownership/close tests |
 | GCS client is shared unsafely | Intermittent corruption/failures | Thread-confined storage adapter per I/O worker |
 | Async failure is lost | False successful marker | Join every future, marker-last assertions, failure injection |
 | Artifact reduction removes required evidence | Product/debug regression | `full` default, explicit essential allowlist, authorized artifact acceptance |
