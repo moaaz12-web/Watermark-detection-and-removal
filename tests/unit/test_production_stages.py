@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image
 
 from watermark_worker.config import load_pipeline_config
+from watermark_worker.contracts import ArtifactProfile
 from watermark_worker.production_stages import (
     DetectionPrediction,
     ProductionBackgroundRemovalStage,
@@ -116,6 +117,19 @@ def test_combined_detection_stage_preserves_each_sam_mask_and_metadata() -> None
         "grounding_dino",
         "yolo",
     ]
+
+
+def test_essential_profile_keeps_detection_masks_without_debug_artifacts() -> None:
+    runtime = FakeDetectionRuntime()
+    stage = ProductionDetectionStage(lambda: runtime, ArtifactProfile.ESSENTIAL)
+
+    output = stage.run(Image.new("RGB", (3, 2), "white"))
+
+    assert len(output.detection_masks) == 2
+    artifacts = {artifact.relative_name: artifact for artifact in output.artifacts}
+    assert set(artifacts) == {"detections/detections.json"}
+    metadata = json.loads(artifacts["detections/detections.json"].data)
+    assert all("maskArtifact" not in row for row in metadata["detections"])
 
 
 @dataclass

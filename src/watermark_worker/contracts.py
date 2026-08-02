@@ -56,6 +56,11 @@ class StorageMode(StrEnum):
     GCS = "GCS"
 
 
+class ArtifactProfile(StrEnum):
+    FULL = "full"
+    ESSENTIAL = "essential"
+
+
 class ItemStatus(StrEnum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
@@ -172,6 +177,7 @@ class InputManifest(ContractModel):
     job_id: Identifier
     tenant_id: Identifier
     pipeline_version: str = Field(min_length=1, max_length=128)
+    artifact_profile: ArtifactProfile = ArtifactProfile.FULL
     created_at: datetime
     items: list[ManifestItem] = Field(min_length=1)
 

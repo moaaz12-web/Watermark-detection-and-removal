@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from watermark_worker.config import PipelineConfig
+from watermark_worker.contracts import ArtifactProfile
 from watermark_worker.gpu_runtime.acceptance import GpuAcceptanceRecorder
 from watermark_worker.gpu_runtime.provider import LocalGpuRuntimeProvider
 from watermark_worker.model_bundles import ModelBundleCache
@@ -18,6 +19,7 @@ def build_default_production_executor(
     manifest: ModelManifest,
     storage: StorageAdapter,
     work_root: Path,
+    artifact_profile: ArtifactProfile = ArtifactProfile.FULL,
 ) -> PipelineExecutor:
     """Assemble the production GPU path without runtime installs or public downloads."""
     model_storage = storage if isinstance(storage, GcsStorageAdapter) else GcsStorageAdapter()
@@ -37,5 +39,6 @@ def build_default_production_executor(
         ),
         preparer=ModelBundleCache(work_root / "bundles"),
         runtime_provider=runtime_provider,
+        artifact_profile=artifact_profile,
         on_stage_lifecycle=acceptance.record,
     )

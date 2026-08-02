@@ -11,6 +11,7 @@ from watermark_worker.config import (
     PipelineConfig,
     SegmentationConfig,
 )
+from watermark_worker.contracts import ArtifactProfile
 from watermark_worker.errors import ModelValidationError
 from watermark_worker.model_bundles import PreparedModelArtifact
 from watermark_worker.model_registry import (
@@ -77,6 +78,7 @@ def build_production_executor(
     materializer: ModelArtifactMaterializer,
     preparer: ModelArtifactPreparer,
     runtime_provider: ProductionRuntimeProvider,
+    artifact_profile: ArtifactProfile = ArtifactProfile.FULL,
     on_stage_lifecycle: Callable[[StageLifecycleEvent], None] | None = None,
 ) -> PipelineExecutor:
     """Prepare immutable artifacts and assemble one all-resident pipeline executor."""
@@ -99,9 +101,7 @@ def build_production_executor(
     sam2 = prepared[config.segmentation.model_artifact_id]
     lama = prepared[config.inpainting.model_artifact_id]
     yolo = (
-        prepared[config.detection.yolo.model_artifact_id]
-        if config.detection.yolo.enabled
-        else None
+        prepared[config.detection.yolo.model_artifact_id] if config.detection.yolo.enabled else None
     )
     grounding_dino = (
         prepared[config.detection.grounding_dino.model_artifact_id]
@@ -116,14 +116,14 @@ def build_production_executor(
 
     return PipelineExecutor(
         background_removal=ProductionBackgroundRemovalStage(
-            lambda: runtime_provider.load_background_removal(
-                rmbg, config.background_removal
-            )
+            lambda: runtime_provider.load_background_removal(rmbg, config.background_removal),
+            artifact_profile,
         ),
         detection=ProductionDetectionStage(
             lambda: runtime_provider.load_detection(
                 detection_artifacts, config.detection, config.segmentation
-            )
+            ),
+            artifact_profile,
         ),
         inpainting=ProductionInpaintingStage(
             lambda: runtime_provider.load_inpainting(lama, config.inpainting),
@@ -134,9 +134,7 @@ def build_production_executor(
     )
 
 
-def _require_exact_artifact_set(
-    state: str, expected: set[str], actual: set[str]
-) -> None:
+def _require_exact_artifact_set(state: str, expected: set[str], actual: set[str]) -> None:
     missing = sorted(expected - actual)
     unexpected = sorted(actual - expected)
     if missing or unexpected:
@@ -146,6 +144,5 @@ def _require_exact_artifact_set(
         if unexpected:
             details.append("unexpected " + ", ".join(unexpected))
         raise ModelValidationError(
-            f"{state} model artifact set does not match the configuration: "
-            + "; ".join(details)
+            f"{state} model artifact set does not match the configuration: " + "; ".join(details)
         )

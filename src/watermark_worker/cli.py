@@ -445,6 +445,7 @@ def run(
                                 manifest=loaded_models.manifest,
                                 storage=storage,
                                 work_root=_model_work_root(),
+                                artifact_profile=manifest.artifact_profile,
                             )
                             initialize = getattr(active_executor, "initialize", None)
                             if initialize is not None:

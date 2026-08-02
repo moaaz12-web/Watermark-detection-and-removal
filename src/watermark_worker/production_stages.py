@@ -9,6 +9,7 @@ from typing import Generic, Protocol, TypeVar
 from PIL import Image, ImageDraw, ImageFilter
 
 from watermark_worker.config import InpaintingConfig
+from watermark_worker.contracts import ArtifactProfile
 from watermark_worker.errors import ModelValidationError
 from watermark_worker.pipeline import (
     BackgroundRemovalOutput,
@@ -83,8 +84,13 @@ class _LazyRuntime(Generic[RuntimeT]):
 
 
 class ProductionBackgroundRemovalStage:
-    def __init__(self, runtime_factory: Callable[[], RmbgRuntime]) -> None:
+    def __init__(
+        self,
+        runtime_factory: Callable[[], RmbgRuntime],
+        artifact_profile: ArtifactProfile = ArtifactProfile.FULL,
+    ) -> None:
         self.runtime = _LazyRuntime(runtime_factory)
+        self.artifact_profile = artifact_profile
 
     def run(self, source: Image.Image) -> BackgroundRemovalOutput:
         prediction = self.runtime.get().predict(source)
@@ -106,7 +112,9 @@ class ProductionBackgroundRemovalStage:
                     _png_bytes(mask_image),
                     "image/png",
                 ),
-            ),
+            )
+            if self.artifact_profile is ArtifactProfile.FULL
+            else (),
         )
 
     def close(self) -> None:
@@ -117,8 +125,13 @@ class ProductionBackgroundRemovalStage:
 
 
 class ProductionDetectionStage:
-    def __init__(self, runtime_factory: Callable[[], DetectionRuntime]) -> None:
+    def __init__(
+        self,
+        runtime_factory: Callable[[], DetectionRuntime],
+        artifact_profile: ArtifactProfile = ArtifactProfile.FULL,
+    ) -> None:
         self.runtime = _LazyRuntime(runtime_factory)
+        self.artifact_profile = artifact_profile
 
     def run(self, detector_image: Image.Image) -> DetectionOutput:
         image = detector_image.convert("RGB")
@@ -126,8 +139,8 @@ class ProductionDetectionStage:
         masks: list[BinaryMask] = []
         artifacts: list[StageArtifact] = []
         rows: list[dict[str, object]] = []
-        annotated = image.copy()
-        drawing = ImageDraw.Draw(annotated)
+        annotated = image.copy() if self.artifact_profile is ArtifactProfile.FULL else None
+        drawing = ImageDraw.Draw(annotated) if annotated is not None else None
 
         for index, prediction in enumerate(detected):
             mask_image = prediction.mask.convert("L")
@@ -136,13 +149,15 @@ class ProductionDetectionStage:
             mask = _binary_mask(mask_image)
             masks.append(mask)
             mask_name = f"masks/{prediction.detector}_{index:03d}.png"
-            artifacts.append(StageArtifact(mask_name, mask.to_png_bytes(), "image/png"))
-            drawing.rectangle(prediction.box_xyxy, outline=(255, 128, 0), width=2)
-            drawing.text(
-                (prediction.box_xyxy[0], prediction.box_xyxy[1]),
-                f"{prediction.detector}: {prediction.confidence:.3f}",
-                fill=(255, 128, 0),
-            )
+            if self.artifact_profile is ArtifactProfile.FULL:
+                artifacts.append(StageArtifact(mask_name, mask.to_png_bytes(), "image/png"))
+                assert drawing is not None
+                drawing.rectangle(prediction.box_xyxy, outline=(255, 128, 0), width=2)
+                drawing.text(
+                    (prediction.box_xyxy[0], prediction.box_xyxy[1]),
+                    f"{prediction.detector}: {prediction.confidence:.3f}",
+                    fill=(255, 128, 0),
+                )
             rows.append(
                 {
                     "detector": prediction.detector,
@@ -150,7 +165,11 @@ class ProductionDetectionStage:
                     "confidence": prediction.confidence,
                     "boxXyxy": list(prediction.box_xyxy),
                     "samScore": prediction.sam_score,
-                    "maskArtifact": mask_name,
+                    **(
+                        {"maskArtifact": mask_name}
+                        if self.artifact_profile is ArtifactProfile.FULL
+                        else {}
+                    ),
                 }
             )
 
@@ -165,11 +184,13 @@ class ProductionDetectionStage:
                     ).encode("utf-8"),
                     "application/json",
                 ),
-                StageArtifact(
-                    "detections/annotated.png", _png_bytes(annotated), "image/png"
-                ),
             )
         )
+        if annotated is not None:
+            artifacts.append(
+                StageArtifact("detections/annotated.png", _png_bytes(annotated), "image/png")
+            )
+            annotated.close()
         return DetectionOutput(detection_masks=tuple(masks), artifacts=tuple(artifacts))
 
     def close(self) -> None:
