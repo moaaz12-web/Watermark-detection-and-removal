@@ -459,9 +459,12 @@ thread.
 
 ### Task T6: Define an explicit artifact-retention policy
 
-**Description:** Add a strict pipeline-config section that distinguishes contract-critical/audit
-artifacts from large review-only diagnostics. Artifact policy affects immutable output identity and
-therefore belongs in the checksum-pinned pipeline config, not an untracked environment toggle.
+**Description:** Define strict full and essential artifact profiles that distinguish
+contract-critical/audit artifacts from large review-only diagnostics. The selected profile affects
+immutable output identity, so it must be a validated, persisted FastAPI job field and part of the
+pinned input manifest, never an untracked environment toggle. The detailed cross-repository
+implementation sequence is in
+[14-per-job-artifact-profile-implementation-plan.md](14-per-job-artifact-profile-implementation-plan.md).
 
 Proposed profiles:
 
