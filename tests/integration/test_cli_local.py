@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from threading import Event
 
 import pytest
 from PIL import Image
@@ -239,15 +240,18 @@ def test_local_run_emits_versioned_item_and_job_timing_events(
     manifest_path = write_local_manifest(tmp_path, item_count=1)
     output_root = tmp_path / "output"
 
-    assert entrypoint(
-        inference_arguments(
-            manifest_path=manifest_path,
-            output_root=output_root,
-            config_path=config_path,
-            model_manifest_path=model_manifest_path,
-        ),
-        executor=reference_executor(config_path)[0],
-    ) == 0
+    assert (
+        entrypoint(
+            inference_arguments(
+                manifest_path=manifest_path,
+                output_root=output_root,
+                config_path=config_path,
+                model_manifest_path=model_manifest_path,
+            ),
+            executor=reference_executor(config_path)[0],
+        )
+        == 0
+    )
 
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     item_timing = next(
@@ -261,8 +265,8 @@ def test_local_run_emits_versioned_item_and_job_timing_events(
     assert item_timing["sourceBytes"] > 0
     assert item_timing["artifactCount"] > 0
     assert item_timing["itemWallMilliseconds"] >= 0
-    assert item_timing["inputQueueWaitMilliseconds"] is None
-    assert item_timing["outputQueueWaitMilliseconds"] is None
+    assert item_timing["inputQueueWaitMilliseconds"] is not None
+    assert item_timing["outputQueueWaitMilliseconds"] is not None
     assert job_timing["schemaVersion"] == 1
     assert job_timing["totalItems"] == 1
     assert job_timing["succeededItems"] == 1
@@ -290,9 +294,7 @@ def test_local_reference_inference_writes_the_documented_artifact_contract(
                         "itemId": "asset_123",
                         "inputPath": "inputs/asset_123.png",
                         "outputPrefix": "tenant_17/wm_123/asset_123/",
-                        "sourceChecksumSha256": hashlib.sha256(
-                            image_path.read_bytes()
-                        ).hexdigest(),
+                        "sourceChecksumSha256": hashlib.sha256(image_path.read_bytes()).hexdigest(),
                     }
                 ],
             }
@@ -428,9 +430,7 @@ def test_reference_batch_isolates_one_corrupt_item_across_five_items(
 
     assert exit_code == 0
     output_manifest = json.loads(
-        (output_root / "tenant_17/wm_batch/output-manifest.json").read_text(
-            encoding="utf-8"
-        )
+        (output_root / "tenant_17/wm_batch/output-manifest.json").read_text(encoding="utf-8")
     )
     assert output_manifest["counts"] == {
         "blocked": 0,
@@ -443,9 +443,7 @@ def test_reference_batch_isolates_one_corrupt_item_across_five_items(
         f"asset_{index}" for index in range(5)
     ]
     corrupt_result = json.loads(
-        (output_root / "tenant_17/wm_batch/asset_2/result.json").read_text(
-            encoding="utf-8"
-        )
+        (output_root / "tenant_17/wm_batch/asset_2/result.json").read_text(encoding="utf-8")
     )
     assert corrupt_result["status"] == "FAILED"
     assert corrupt_result["errorCode"] == "CORRUPT_IMAGE"
@@ -454,7 +452,7 @@ def test_reference_batch_isolates_one_corrupt_item_across_five_items(
     assert background.closed == detection.closed == inpainting.closed == 1
 
 
-def test_inference_decodes_and_processes_only_one_item_at_a_time(
+def test_inference_prefetches_only_one_next_image_while_gpu_processing_stays_serial(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -483,7 +481,7 @@ def test_inference_decodes_and_processes_only_one_item_at_a_time(
 
     class OneItemExecutor:
         def process_one(self, item):
-            assert active_images == 1
+            assert active_images <= 2
             return base_executor.process_one(item)
 
         def close(self) -> None:
@@ -502,10 +500,51 @@ def test_inference_decodes_and_processes_only_one_item_at_a_time(
     )
 
     assert exit_code == 0
-    assert peak_active_images == 1
+    assert peak_active_images <= 2
     assert active_images == 0
     assert background.calls == detection.calls == inpainting.calls == 5
     assert background.closed == detection.closed == inpainting.closed == 1
+
+
+def test_inference_starts_the_next_gpu_item_while_previous_output_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    manifest_path = write_local_manifest(tmp_path, item_count=3)
+    output_root = tmp_path / "output"
+    base_executor, _, _, _ = reference_executor(config_path)
+    first_item_write_started = Event()
+    original_write_item = ResultWriter.write_item
+
+    def track_first_item_write(writer: ResultWriter, *args: object, **kwargs: object) -> object:
+        if kwargs["result"].item_id == "asset_0":  # type: ignore[index,union-attr]
+            first_item_write_started.set()
+        return original_write_item(writer, *args, **kwargs)  # type: ignore[arg-type]
+
+    class OverlapExecutor:
+        def process_one(self, item):
+            if item.item_id == "asset_1":
+                assert first_item_write_started.wait(timeout=2)
+            return base_executor.process_one(item)
+
+        def close(self) -> None:
+            base_executor.close()
+
+    monkeypatch.setattr(ResultWriter, "write_item", track_first_item_write)
+
+    assert (
+        entrypoint(
+            inference_arguments(
+                manifest_path=manifest_path,
+                output_root=output_root,
+                config_path=config_path,
+                model_manifest_path=model_manifest_path,
+            ),
+            executor=OverlapExecutor(),  # type: ignore[arg-type]
+        )
+        == 0
+    )
 
 
 def test_reference_batch_resumes_after_interruption_and_skips_completed_items(
@@ -535,28 +574,28 @@ def test_reference_batch_resumes_after_interruption_and_skips_completed_items(
         return written
 
     monkeypatch.setattr(ResultWriter, "write_item", interrupt_after_second_item)
-    first_executor, first_background, first_detection, first_inpainting = (
-        reference_executor(config_path)
+    first_executor, first_background, first_detection, first_inpainting = reference_executor(
+        config_path
     )
 
     assert entrypoint(arguments, executor=first_executor) == 6
     assert not (output_root / "tenant_17/wm_batch/_COMPLETE.json").exists()
-    assert first_background.calls == first_detection.calls == 2
-    assert first_inpainting.calls == 2
+    # The fixed N+1 pipeline may have started one additional GPU item before
+    # the second durable write reports its failure.
+    assert first_background.calls == first_detection.calls == 3
+    assert first_inpainting.calls == 3
     assert first_background.closed == first_detection.closed == first_inpainting.closed == 1
 
     monkeypatch.setattr(ResultWriter, "write_item", original_write_item)
-    second_executor, second_background, second_detection, second_inpainting = (
-        reference_executor(config_path)
+    second_executor, second_background, second_detection, second_inpainting = reference_executor(
+        config_path
     )
 
     assert entrypoint(arguments, executor=second_executor) == 0
     assert second_background.calls == second_detection.calls == second_inpainting.calls == 3
     assert second_background.closed == second_detection.closed == second_inpainting.closed == 1
     output_manifest = json.loads(
-        (output_root / "tenant_17/wm_batch/output-manifest.json").read_text(
-            encoding="utf-8"
-        )
+        (output_root / "tenant_17/wm_batch/output-manifest.json").read_text(encoding="utf-8")
     )
     assert output_manifest["counts"] == {
         "blocked": 0,

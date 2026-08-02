@@ -5,6 +5,9 @@ import json
 import os
 import time
 import warnings
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import BytesIO
@@ -90,6 +93,56 @@ class PreparedInferenceItem:
     image: Image.Image
     started_at: float
 
+    def close(self) -> None:
+        self.image.close()
+
+
+@dataclass(frozen=True)
+class PreparedWorkItem:
+    """A terminal replay/failure or a decoded input owned by the main lane."""
+
+    manifest_item: ManifestItem
+    source: InputIdentity
+    source_data: bytes
+    image_digest: str
+    timing: ItemTimingRecorder
+    completion_reads: int
+    inference: PreparedInferenceItem | None = None
+    terminal_result: ItemResult | None = None
+    completed_entry: OutputManifestEntry | None = None
+    reused: bool = False
+
+    def close(self) -> None:
+        if self.inference is not None:
+            self.inference.close()
+
+
+@dataclass(frozen=True)
+class PendingOutputItem:
+    result: ItemResult
+    output_prefix: str
+    source: InputIdentity
+    image_digest: str
+    artifacts: list[ArtifactPayload]
+    final_image: Image.Image | None
+    timing: ItemTimingRecorder
+    pipeline_timing: PipelineTiming | None
+    source_bytes: int
+    completion_reads: int
+    started_at: float
+    enqueued_at: float
+
+
+@dataclass(frozen=True)
+class WrittenOutputItem:
+    result: ItemResult
+    entry: OutputManifestEntry
+    reused: bool
+    timing: ItemTimingEvent
+
+
+StorageFactory = Callable[[], StorageAdapter]
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the fail-closed watermark worker")
@@ -148,10 +201,16 @@ def entrypoint(
     *,
     executor: PipelineExecutor | None = None,
     storage: StorageAdapter | None = None,
+    storage_factory: StorageFactory | None = None,
 ) -> int:
     try:
         arguments = parse_arguments(argv)
-        return run(arguments, executor=executor, storage=storage)
+        return run(
+            arguments,
+            executor=executor,
+            storage=storage,
+            storage_factory=storage_factory,
+        )
     except SystemExit as exc:
         return int(exc.code) if isinstance(exc.code, int) else 2
     except WorkerError as exc:
@@ -167,6 +226,7 @@ def run(
     *,
     executor: PipelineExecutor | None = None,
     storage: StorageAdapter | None = None,
+    storage_factory: StorageFactory | None = None,
 ) -> int:
     worker_started = time.monotonic()
     model_preparation_started = worker_started
@@ -199,11 +259,14 @@ def run(
         manifest=manifest_identity,
     )
     writer = ResultWriter(storage)
+    lane_storage_factory = storage_factory or _default_lane_storage_factory(arguments)
     entries: dict[str, OutputManifestEntry] = {}
     counts = {status: 0 for status in ItemStatus}
     reused_items = 0
     item_pipeline_milliseconds = 0.0
     executor_initialization_milliseconds = 0.0
+    peak_pending_input_items = 0
+    peak_pending_output_items = 0
     emit_event(
         "job_started",
         jobId=manifest.job_id,
@@ -288,9 +351,7 @@ def run(
                 image_digest_sha256=_timed_sha256(source.data, timing),
                 artifacts=artifacts,
             )
-            timing.record(
-                "itemWallMilliseconds", _elapsed_milliseconds(started)
-            )
+            timing.record("itemWallMilliseconds", _elapsed_milliseconds(started))
             record_item(
                 result=result,
                 entry=OutputManifestEntry(
@@ -311,153 +372,167 @@ def run(
             )
     else:
         active_executor: PipelineExecutor | None = None
-        try:
-            for item in manifest.items:
-                started = time.monotonic()
-                timing = ItemTimingRecorder()
-                source, source_identity = _read_item_source(
-                    item=item,
-                    manifest=manifest,
-                    arguments=arguments,
-                    storage=storage,
-                    timing=timing,
-                )
-                with timing.measure("sourceChecksumMilliseconds"):
-                    image_digest = sha256_bytes(source.data)
-                with timing.measure("completionLookupMilliseconds"):
-                    completed = writer.read_completed_item(
-                        item_id=item.item_id,
-                        output_prefix=item.output_prefix,
-                        run=run_identity,
-                        source=source_identity,
-                        image_digest_sha256=image_digest,
-                    )
-                completion_reads = writer.last_completion_lookup_timing.gcs_read_count
-                if completed is not None:
-                    timing.record("itemWallMilliseconds", _elapsed_milliseconds(started))
-                    record_item(
-                        result=completed.result,
-                        entry=completed.output_entry,
-                        reused=True,
-                        timing=_build_item_timing_event(
-                            timing=timing,
-                            source_bytes=len(source.data),
-                            gcs_read_count=1 + completion_reads,
-                            detection_count=completed.result.detection_count,
-                        ),
-                    )
-                    continue
-                try:
-                    with timing.measure("decodeMilliseconds"):
-                        decoded, image = decode_image(source.data, loaded_config.config.limits)
-                except ImageValidationError as exc:
-                    result = _failed_image_result(
-                        item_id=item.item_id,
-                        source=source_identity,
-                        run=run_identity,
-                        error_code=exc.error_code,
-                        processing_seconds=time.monotonic() - started,
-                    )
-                    written = writer.write_item(
-                        result=result,
-                        output_prefix=item.output_prefix,
-                        run=run_identity,
-                        source=source_identity,
-                        image_digest_sha256=image_digest,
-                        artifacts=[],
-                    )
-                    timing.record("itemWallMilliseconds", _elapsed_milliseconds(started))
-                    record_item(
-                        result=result,
-                        entry=OutputManifestEntry(
-                            item_id=item.item_id,
-                            status=result.status,
-                            decision=result.decision,
-                            result=written.marker.result,
-                            marker=written.marker_ref,
-                        ),
-                        reused=written.reused,
-                        timing=_build_item_timing_event(
-                            timing=timing,
-                            source_bytes=len(source.data),
-                            writer_timing=written.timing,
-                            gcs_read_count=1 + completion_reads + writer.last_operation_read_count,
-                            detection_count=result.detection_count,
-                        ),
-                    )
-                    continue
+        pending_input: Future[PreparedWorkItem] | None = None
+        pending_output: Future[WrittenOutputItem] | None = None
 
-                context = PreparedInferenceItem(
-                    manifest_item=item,
-                    source=source_identity,
-                    source_data=source.data,
-                    decoded=decoded,
-                    image=image,
-                    started_at=started,
-                )
-                outcome: PipelineOutcome | None = None
-                try:
-                    executor_wait_milliseconds = 0.0
-                    if active_executor is None:
-                        executor_started = time.monotonic()
-                        active_executor = executor or build_default_production_executor(
-                            config=loaded_config.config,
-                            manifest=loaded_models.manifest,
-                            storage=storage,
-                            work_root=_model_work_root(),
-                        )
-                        initialize = getattr(active_executor, "initialize", None)
-                        if initialize is not None:
-                            initialize()
-                        executor_wait_milliseconds = _elapsed_milliseconds(executor_started)
-                        executor_initialization_milliseconds += executor_wait_milliseconds
-                        timing.record(
-                            "executorInitializationWaitMilliseconds",
-                            executor_wait_milliseconds,
-                        )
-                    outcome = active_executor.process_one(
-                        PipelineItem(item_id=item.item_id, source_image=image)
-                    )
-                    with timing.measure("resultAssemblyMilliseconds"):
-                        result, artifacts = _inference_result(
-                            outcome=outcome,
-                            context=context,
-                            run=run_identity,
-                            writer=writer,
-                            processing_seconds=time.monotonic() - started,
-                        )
-                    written = writer.write_item(
-                        result=result,
-                        output_prefix=item.output_prefix,
+        def record_written(written: WrittenOutputItem) -> None:
+            record_item(
+                result=written.result,
+                entry=written.entry,
+                reused=written.reused,
+                timing=written.timing,
+            )
+
+        try:
+            input_lane = _InputLane(lane_storage_factory)
+            output_lane = _OutputLane(lane_storage_factory, run_identity)
+            with (
+                ThreadPoolExecutor(max_workers=1) as input_pool,
+                ThreadPoolExecutor(max_workers=1) as output_pool,
+            ):
+
+                def submit_input(item: ManifestItem) -> Future[PreparedWorkItem]:
+                    return input_pool.submit(
+                        input_lane.prepare,
+                        item=item,
+                        manifest=manifest,
+                        arguments=arguments,
+                        limits=loaded_config.config.limits,
                         run=run_identity,
-                        source=source_identity,
-                        image_digest_sha256=image_digest,
-                        artifacts=artifacts,
                     )
-                    timing.record("itemWallMilliseconds", _elapsed_milliseconds(started))
-                    record_item(
-                        result=result,
-                        entry=OutputManifestEntry(
-                            item_id=result.item_id,
-                            status=result.status,
-                            decision=result.decision,
-                            result=written.marker.result,
-                            marker=written.marker_ref,
-                        ),
-                        reused=written.reused,
-                        timing=_build_item_timing_event(
-                            timing=timing,
+
+                def prepare_output(prepared: PreparedWorkItem) -> PendingOutputItem | None:
+                    nonlocal active_executor, executor_initialization_milliseconds
+                    if prepared.reused:
+                        assert prepared.terminal_result is not None
+                        assert prepared.completed_entry is not None
+                        prepared.timing.record("itemWallMilliseconds", 0.0)
+                        record_item(
+                            result=prepared.terminal_result,
+                            entry=prepared.completed_entry,
+                            reused=True,
+                            timing=_build_item_timing_event(
+                                timing=prepared.timing,
+                                source_bytes=len(prepared.source_data),
+                                gcs_read_count=1 + prepared.completion_reads,
+                                detection_count=prepared.terminal_result.detection_count,
+                            ),
+                        )
+                        return None
+                    if prepared.terminal_result is not None:
+                        return PendingOutputItem(
+                            result=prepared.terminal_result,
+                            output_prefix=prepared.manifest_item.output_prefix,
+                            source=prepared.source,
+                            image_digest=prepared.image_digest,
+                            artifacts=[],
+                            final_image=None,
+                            timing=prepared.timing,
+                            pipeline_timing=None,
+                            source_bytes=len(prepared.source_data),
+                            completion_reads=prepared.completion_reads,
+                            started_at=time.monotonic(),
+                            enqueued_at=time.monotonic(),
+                        )
+                    assert prepared.inference is not None
+                    context = prepared.inference
+                    handed_off_final_image = False
+                    try:
+                        if active_executor is None:
+                            executor_started = time.monotonic()
+                            active_executor = executor or build_default_production_executor(
+                                config=loaded_config.config,
+                                manifest=loaded_models.manifest,
+                                storage=storage,
+                                work_root=_model_work_root(),
+                            )
+                            initialize = getattr(active_executor, "initialize", None)
+                            if initialize is not None:
+                                initialize()
+                            elapsed = _elapsed_milliseconds(executor_started)
+                            executor_initialization_milliseconds += elapsed
+                            prepared.timing.record(
+                                "executorInitializationWaitMilliseconds", elapsed
+                            )
+                        outcome = active_executor.process_one(
+                            PipelineItem(
+                                item_id=context.manifest_item.item_id, source_image=context.image
+                            )
+                        )
+                        with prepared.timing.measure("resultAssemblyMilliseconds"):
+                            result, artifacts = _inference_result(
+                                outcome=outcome,
+                                context=context,
+                                run=run_identity,
+                                writer=writer,
+                                processing_seconds=time.monotonic() - context.started_at,
+                            )
+                        pending = PendingOutputItem(
+                            result=result,
+                            output_prefix=context.manifest_item.output_prefix,
+                            source=context.source,
+                            image_digest=prepared.image_digest,
+                            artifacts=artifacts,
+                            final_image=outcome.final_image,
+                            timing=prepared.timing,
                             pipeline_timing=outcome.timing,
-                            source_bytes=len(source.data),
-                            writer_timing=written.timing,
-                            gcs_read_count=1 + completion_reads + writer.last_operation_read_count,
-                            detection_count=result.detection_count,
-                        ),
+                            source_bytes=len(context.source_data),
+                            completion_reads=prepared.completion_reads,
+                            started_at=context.started_at,
+                            enqueued_at=time.monotonic(),
+                        )
+                        handed_off_final_image = True
+                        return pending
+                    finally:
+                        if (
+                            not handed_off_final_image
+                            and outcome is not None
+                            and outcome.final_image is not None
+                        ):
+                            outcome.final_image.close()
+                        context.close()
+
+                items = iter(manifest.items)
+                first = next(items, None)
+                if first is not None:
+                    pending_input = submit_input(first)
+                    peak_pending_input_items = 1
+                for next_item in items:
+                    assert pending_input is not None
+                    wait_started = time.monotonic()
+                    prepared = pending_input.result()
+                    pending_input = None
+                    prepared.timing.record(
+                        "inputQueueWaitMilliseconds", _elapsed_milliseconds(wait_started)
                     )
-                finally:
-                    if outcome is not None and outcome.final_image is not None:
-                        outcome.final_image.close()
-                    image.close()
+                    pending_input = submit_input(next_item)
+                    next_output = prepare_output(prepared)
+                    if next_output is not None:
+                        if pending_output is not None:
+                            record_written(pending_output.result())
+                        pending_output = output_pool.submit(output_lane.write, next_output)
+                        peak_pending_output_items = 1
+                if pending_input is not None:
+                    wait_started = time.monotonic()
+                    prepared = pending_input.result()
+                    pending_input = None
+                    prepared.timing.record(
+                        "inputQueueWaitMilliseconds", _elapsed_milliseconds(wait_started)
+                    )
+                    next_output = prepare_output(prepared)
+                    if next_output is not None:
+                        if pending_output is not None:
+                            record_written(pending_output.result())
+                        pending_output = output_pool.submit(output_lane.write, next_output)
+                        peak_pending_output_items = 1
+                if pending_output is not None:
+                    record_written(pending_output.result())
+        except BaseException:
+            if pending_input is not None:
+                pending_input.cancel()
+                with suppress(BaseException):
+                    pending_input.result().close()
+            raise
         finally:
             if active_executor is not None:
                 active_executor.close()
@@ -516,6 +591,8 @@ def run(
             executor_initialization_milliseconds=executor_initialization_milliseconds,
             item_pipeline_milliseconds=item_pipeline_milliseconds,
             job_finalization_milliseconds=job_finalization_milliseconds,
+            peak_pending_input_items=peak_pending_input_items,
+            peak_pending_output_items=peak_pending_output_items,
         ).as_event_fields(),
     )
     return 0
@@ -572,6 +649,161 @@ def _elapsed_milliseconds(started: float) -> float:
 def _timed_sha256(data: bytes, timing: ItemTimingRecorder) -> str:
     with timing.measure("sourceChecksumMilliseconds"):
         return sha256_bytes(data)
+
+
+class _InputLane:
+    """Owns a storage adapter and ResultWriter inside the single input thread."""
+
+    def __init__(self, storage_factory: StorageFactory) -> None:
+        self._storage_factory = storage_factory
+        self._storage: StorageAdapter | None = None
+        self._writer: ResultWriter | None = None
+
+    def prepare(
+        self,
+        *,
+        item: ManifestItem,
+        manifest: InputManifest,
+        arguments: CliArguments,
+        limits: ImageLimits,
+        run: RunIdentity,
+    ) -> PreparedWorkItem:
+        if self._storage is None:
+            self._storage = self._storage_factory()
+            self._writer = ResultWriter(self._storage)
+        assert self._writer is not None
+        started = time.monotonic()
+        timing = ItemTimingRecorder()
+        source, source_identity = _read_item_source(
+            item=item,
+            manifest=manifest,
+            arguments=arguments,
+            storage=self._storage,
+            timing=timing,
+        )
+        image_digest = _timed_sha256(source.data, timing)
+        with timing.measure("completionLookupMilliseconds"):
+            completed = self._writer.read_completed_item(
+                item_id=item.item_id,
+                output_prefix=item.output_prefix,
+                run=run,
+                source=source_identity,
+                image_digest_sha256=image_digest,
+            )
+        completion_reads = self._writer.last_completion_lookup_timing.gcs_read_count
+        if completed is not None:
+            return PreparedWorkItem(
+                manifest_item=item,
+                source=source_identity,
+                source_data=source.data,
+                image_digest=image_digest,
+                timing=timing,
+                completion_reads=completion_reads,
+                terminal_result=completed.result,
+                completed_entry=completed.output_entry,
+                reused=True,
+            )
+        try:
+            with timing.measure("decodeMilliseconds"):
+                decoded, image = decode_image(source.data, limits)
+        except ImageValidationError as exc:
+            return PreparedWorkItem(
+                manifest_item=item,
+                source=source_identity,
+                source_data=source.data,
+                image_digest=image_digest,
+                timing=timing,
+                completion_reads=completion_reads,
+                terminal_result=_failed_image_result(
+                    item_id=item.item_id,
+                    source=source_identity,
+                    run=run,
+                    error_code=exc.error_code,
+                    processing_seconds=time.monotonic() - started,
+                ),
+            )
+        return PreparedWorkItem(
+            manifest_item=item,
+            source=source_identity,
+            source_data=source.data,
+            image_digest=image_digest,
+            timing=timing,
+            completion_reads=completion_reads,
+            inference=PreparedInferenceItem(
+                manifest_item=item,
+                source=source_identity,
+                source_data=source.data,
+                decoded=decoded,
+                image=image,
+                started_at=started,
+            ),
+        )
+
+
+class _OutputLane:
+    """Owns a storage adapter and ResultWriter inside the single output thread."""
+
+    def __init__(self, storage_factory: StorageFactory, run: RunIdentity) -> None:
+        self._storage_factory = storage_factory
+        self._run = run
+        self._writer: ResultWriter | None = None
+
+    def write(self, pending: PendingOutputItem) -> WrittenOutputItem:
+        if self._writer is None:
+            self._writer = ResultWriter(self._storage_factory())
+        pending.timing.record(
+            "outputQueueWaitMilliseconds", _elapsed_milliseconds(pending.enqueued_at)
+        )
+        final_artifact: ArtifactPayload | None = None
+        try:
+            if pending.final_image is not None:
+                final_artifact = ArtifactPayload(
+                    relative_name="inpainted/final.png",
+                    data=_png_bytes(pending.final_image),
+                    content_type="image/png",
+                )
+            written = self._writer.write_item(
+                result=pending.result,
+                output_prefix=pending.output_prefix,
+                run=self._run,
+                source=pending.source,
+                image_digest_sha256=pending.image_digest,
+                artifacts=[*pending.artifacts, *([final_artifact] if final_artifact else [])],
+            )
+        finally:
+            if pending.final_image is not None:
+                pending.final_image.close()
+        pending.timing.record("itemWallMilliseconds", _elapsed_milliseconds(pending.started_at))
+        return WrittenOutputItem(
+            result=pending.result,
+            entry=OutputManifestEntry(
+                item_id=pending.result.item_id,
+                status=pending.result.status,
+                decision=pending.result.decision,
+                result=written.marker.result,
+                marker=written.marker_ref,
+            ),
+            reused=written.reused,
+            timing=_build_item_timing_event(
+                timing=pending.timing,
+                pipeline_timing=pending.pipeline_timing,
+                source_bytes=pending.source_bytes,
+                writer_timing=written.timing,
+                gcs_read_count=(
+                    1 + pending.completion_reads + self._writer.last_operation_read_count
+                ),
+                detection_count=pending.result.detection_count,
+            ),
+        )
+
+
+def _default_lane_storage_factory(arguments: CliArguments) -> StorageFactory:
+    if arguments.manifest_path is not None:
+        output_root = arguments.local_output_root
+        if output_root is None:
+            raise InvalidCliError("--local-output-root is required with --manifest-path")
+        return lambda: LocalStorageAdapter(output_root)
+    return build_gcs_storage_adapter
 
 
 def _model_work_root() -> Path:
@@ -658,9 +890,7 @@ def _read_item_source(
     timing: ItemTimingRecorder | None = None,
 ) -> tuple[StoredObject, InputIdentity]:
     source_uri = (
-        _source_uri(item.input_path, arguments.manifest_path)
-        if item.input_path
-        else item.input_uri
+        _source_uri(item.input_path, arguments.manifest_path) if item.input_path else item.input_uri
     )
     if source_uri is None:
         raise InvalidManifestError(f"item {item.item_id} has no source URI")
@@ -788,14 +1018,6 @@ def _inference_result(
             for artifact in outcome.artifacts
         ],
     ]
-    if outcome.final_image is not None:
-        artifacts.append(
-            ArtifactPayload(
-                relative_name="inpainted/final.png",
-                data=_png_bytes(outcome.final_image),
-                content_type="image/png",
-            )
-        )
     names = [artifact.relative_name for artifact in artifacts]
     if len(names) != len(set(names)):
         raise RuntimeError(f"item {outcome.item_id} produced duplicate artifact names")
