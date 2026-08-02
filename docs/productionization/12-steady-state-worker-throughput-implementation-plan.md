@@ -8,12 +8,11 @@ Primary repository: `/home/maaz/Desktop/watermarkPoc`
 
 ## 1. Purpose
 
-This plan covers the first four measured optimizations for the AWS GPU worker:
+This plan covers the first three measured optimization workstreams for the AWS GPU worker:
 
 1. add per-item stage timings;
-2. compile and require the missing CUDA custom kernel;
-3. overlap bounded CPU/GCS input and output work with the single-GPU pipeline; and
-4. reduce optional artifact encoding and upload overhead while preserving immutable results.
+2. overlap bounded CPU/GCS input and output work with the single-GPU pipeline; and
+3. reduce optional artifact encoding and upload overhead while preserving immutable results.
 
 The goal is to improve the steady-state interval from first completed image to final completed
 image without weakening safety decisions, immutable GCS identities, retry behavior, or scale-to-zero
@@ -23,8 +22,8 @@ Implementation note (2026-08-02): T1/T2 are implemented on the `watermark_pipeli
 worker now records monotonic stage spans, emits one safe versioned item timing event per terminal
 item, and emits one aggregate job timing event after the durable job marker. The persisted result,
 item marker, and output-manifest schemas are unchanged. The next checkpoint is a deployed
-measurement-only image and the deterministic timing analysis from T2a; CUDA, prefetch, and artifact
-optimization work remains intentionally unstarted.
+measurement-only image and the deterministic timing analysis from T2a; prefetch and artifact
+optimization work remain intentionally unstarted.
 
 This is a worker-image project. It does not require a FastAPI or Cloud Run deployment unless the
 accepted implementation changes an application-facing contract. The intended design below avoids
@@ -56,11 +55,6 @@ representative source set.
 At the latest workload mix, linear steady-state projection is about 20.6 hours for 10,000 images.
 The minimum 10-hour throughput is 16.67 images/minute, and the preferred safety-margin target is
 20 images/minute. These are benchmark gates, not promises.
-
-The run also emitted repeated warnings that the multi-scale deformable-attention CUDA extension
-could not load because `CUDA_HOME` and the compiled shared object were unavailable. The worker
-continued through a fallback path. Whether that fallback materially affects detection latency must
-be measured, not assumed.
 
 ## 3. Existing execution path
 
@@ -232,19 +226,17 @@ The script must consume exported JSON logs and must not require production crede
 T1 timing primitives
   -> T2 end-to-end timing events
       -> benchmark checkpoint A
-          -> T3 custom-kernel discovery/build
-              -> benchmark checkpoint B
           -> T4 bounded input prefetch
               -> T5 bounded output overlap
-                  -> benchmark checkpoint C
+                  -> benchmark checkpoint B
                       -> T6 artifact policy
                           -> T7 avoid optional encoding
                               -> T8 bounded artifact uploads
-                                  -> benchmark checkpoint D
+                                  -> benchmark checkpoint C
 ```
 
-Do not combine all four optimizations into one image or commit. Each checkpoint must produce an
-immutable worker image digest that can be rolled back independently.
+Do not combine the remaining optimization workstreams into one image or commit. Each checkpoint
+must produce an immutable worker image digest that can be rolled back independently.
 
 ## 8. Phase A: stage-level measurement
 
@@ -348,89 +340,10 @@ table without network access.
 - Run the frozen representative benchmark at least three times.
 - Confirm 99 item timing events and one job timing event per attempt.
 - Confirm timing overhead is less than 5% at p50 throughput.
-- Record p50/p95 for every stage before changing the CUDA build or concurrency.
+- Record p50/p95 for every stage before changing concurrency or artifact retention.
 - Prove zero active GPU capacity after the benchmark.
 
-## 9. Phase B: compiled CUDA custom kernel
-
-### Task T3: Identify and pin the extension build contract
-
-**Description:** Determine which installed package/source owns the failing
-`MultiScaleDeformableAttention` extension and the exact build command compatible with PyTorch
-`2.5.1+cu121`. Do not toggle `SAM2_BUILD_CUDA` merely because it mentions CUDA; the warning must be
-traced to its actual owner.
-
-**Acceptance criteria:**
-
-- The extension source, Python import path, produced `.so`, compiler ABI, CUDA architecture list,
-  and license are documented.
-- A local/CodeBuild probe distinguishes the compiled path from the fallback path.
-- The selected build and runtime base images are pinned by digest; no mutable tag or runtime fetch
-  is introduced.
-
-**Verification:**
-
-- A CPU-only container import probe loads the compiled module without initializing CUDA.
-- A controlled GPU probe performs the relevant forward path and proves the compiled operation was
-  selected.
-
-**Dependencies:** Checkpoint A.
-
-**Files likely touched:**
-
-- `Dockerfile.gpu`
-- `requirements-gpu.lock` only if a reviewed build dependency is required
-- `tests/unit/test_container_contract.py`
-- `tests/container/test_container_smoke.py`
-- a focused note under `docs/productionization/`
-
-**Estimated scope:** Medium.
-
-### Task T3a: Compile in the builder and keep the runtime minimal
-
-**Description:** Use a digest-pinned CUDA development builder with the compiler/toolkit required by
-the extension, then copy only the virtual environment and compiled shared object into the existing
-non-root runtime. Set `CUDA_HOME` only where required. Do not install compilers or `nvcc` in the
-runtime image.
-
-**Acceptance criteria:**
-
-- CodeBuild fails if the compiled extension is absent or imports through the fallback.
-- The runtime remains non-root, read-only compatible, network-independent, and checksum-pinned.
-- `SAM2_BUILD_CUDA=0` remains unchanged unless T3 proves this exact extension is owned by SAM 2 and
-  GPU parity tests justify changing it.
-
-**Verification:**
-
-- Container contract tests assert digest-pinned build inputs and absence of compiler tooling in the
-  runtime stage.
-- CodeBuild smoke imports the exact extension path.
-- One controlled GPU acceptance has no missing-kernel warning.
-
-**Dependencies:** T3.
-
-**Files likely touched:**
-
-- `Dockerfile.gpu`
-- `buildspec.yml`
-- `infra/aws/codebuild.tf` if a separate `GPU_BUILD_IMAGE` argument is required
-- `infra/aws/variables.tf`
-- `infra/aws/environments/staging.tfvars.example`
-- container tests
-
-**Estimated scope:** Medium.
-
-### Checkpoint B: Kernel A/B benchmark
-
-- Use the same source generations and outcome-quality review set as Checkpoint A.
-- Run at least three attempts with the measurement image and three with the compiled-kernel image.
-- Compare detection p50/p95, total item p50/p95, throughput, peak CUDA memory, and decisions.
-- Require zero safety-decision regressions on the reviewed set.
-- Keep the compiled path only if it removes the warning and produces a repeatable improvement or is
-  otherwise required for correctness/supportability.
-- Restore zero GPU capacity.
-
-## 10. Phase C: bounded I/O overlap
+## 9. Phase B: bounded I/O overlap
 
 ### Task T4: Extract a testable prepared-input boundary
 
@@ -451,7 +364,7 @@ touch CUDA or the shared pipeline executor.
   replay.
 - Tests prove every decoded image is closed on success, failure, and cancellation.
 
-**Dependencies:** Checkpoint B.
+**Dependencies:** Checkpoint A.
 
 **Files likely touched:**
 
@@ -528,7 +441,7 @@ thread.
 
 **Estimated scope:** Medium.
 
-### Checkpoint C: I/O-overlap benchmark
+### Checkpoint B: I/O-overlap benchmark
 
 - Benchmark synchronous, input-depth-1, input-depth-2, and input-depth-2/output-depth-1 modes.
 - Use three attempts per mode and the same immutable source set.
@@ -538,7 +451,7 @@ thread.
 - Reject a mode that improves the mean while materially worsening p95, memory, or reliability.
 - Keep complete GPU calls serial and restore zero GPU capacity.
 
-## 11. Phase D: artifact retention and upload efficiency
+## 10. Phase C: artifact retention and upload efficiency
 
 ### Task T6: Define an explicit artifact-retention policy
 
@@ -572,7 +485,7 @@ Review-only artifacts omitted by `essential`:
 - Contract tests enumerate exact artifacts for both profiles and every outcome.
 - Replay rejects an artifact set generated under an incompatible config identity.
 
-**Dependencies:** Checkpoint C.
+**Dependencies:** Checkpoint B.
 
 **Files likely touched:**
 
@@ -649,7 +562,7 @@ to detection count or item count.
 
 **Estimated scope:** Medium.
 
-### Checkpoint D: Artifact-policy and upload benchmark
+### Checkpoint C: Artifact-policy and upload benchmark
 
 - Benchmark `full` serial upload, `full` concurrent upload, and `essential` concurrent upload.
 - Compare object count, artifact bytes, serialization time, upload time, p50/p95 item time,
@@ -659,7 +572,7 @@ to detection count or item count.
 - Require zero missing contract-critical objects and zero decision regressions.
 - Restore zero GPU capacity.
 
-## 12. Required test matrix
+## 11. Required test matrix
 
 | Area | Required cases |
 | --- | --- |
@@ -668,7 +581,6 @@ to detection count or item count.
 | Output overlap | backpressure, out-of-order completion, writer failure, drain before job marker |
 | Artifact policy | full/essential sets for success, skip, block, failure |
 | Artifact upload | concurrency bound, deterministic references, partial failure, retry adoption |
-| CUDA extension | build probe, CPU import, GPU compiled-path probe, fallback rejection |
 | Security | non-root, read-only runtime, no runtime network fetch, no secrets in logs |
 | Scale | synthetic 10,000-entry manifest with bounded memory/queue counts |
 
@@ -681,12 +593,11 @@ rtk python -m compileall -q src tests scripts
 rtk git diff --check
 ```
 
-Run container tests with the reviewed GPU image and their documented environment gates. Do not
-pretend a CPU-only test proves the CUDA extension executes on a T4.
+Run container tests with the reviewed GPU image and their documented environment gates.
 
-## 13. Benchmark protocol
+## 12. Benchmark protocol
 
-### 13.1 Dataset
+### 12.1 Dataset
 
 - Use at least 100 fixed source objects; 500 is preferred for final capacity evidence.
 - Pin every source URI, generation, checksum, and size.
@@ -694,7 +605,7 @@ pretend a CPU-only test proves the CUDA extension executes on a T4.
 - Use a new job ID and output prefix per attempt; never reuse completed output from a prior digest.
 - Run at least three attempts per configuration after one warm-up/acceptance attempt.
 
-### 13.2 Metrics
+### 12.2 Metrics
 
 Record:
 
@@ -708,34 +619,32 @@ Record:
 - peak system RAM and CUDA allocated/reserved bytes; and
 - worker image digest, config checksum, and model-manifest checksum.
 
-### 13.3 Decision gates
+### 12.3 Decision gates
 
 - Correctness and safety gates are pass/fail and take precedence over speed.
 - No optimization is accepted from a single run.
 - Retain a change only when the same dataset shows a repeatable stage-specific improvement.
-- The combined four-task result should materially improve the current approximately 8.1
+- The combined planned work should materially improve the current approximately 8.1
   images/minute. Reaching 16.67 images/minute remains the 10-hour single-worker target.
-- If the first four tasks do not reach the target, the next decision is stage-specific inference
+- If the planned workstreams do not reach the target, the next decision is stage-specific inference
   optimization or multi-GPU sharding, not unbounded concurrency on the T4.
 
-## 14. Commit and deployment sequence
+## 13. Commit and deployment sequence
 
 Use small, reversible commits and immutable images:
 
 1. `feat: add worker item stage timings`
 2. `test: add deterministic worker timing analysis`
 3. build/deploy/benchmark Checkpoint A
-4. `build: compile deformable-attention CUDA extension`
-5. build/deploy/benchmark Checkpoint B
-6. `refactor: extract prepared worker input boundary`
-7. `feat: add bounded worker input prefetch`
-8. `feat: overlap one durable item write`
-9. build/deploy/benchmark Checkpoint C
-10. `feat: add worker artifact retention profiles`
-11. `perf: skip optional diagnostic artifact encoding`
-12. `perf: upload item artifacts with bounded concurrency`
-13. build/deploy/benchmark Checkpoint D
-14. `docs: record final worker throughput baseline`
+4. `refactor: extract prepared worker input boundary`
+5. `feat: add bounded worker input prefetch`
+6. `feat: overlap one durable item write`
+7. build/deploy/benchmark Checkpoint B
+8. `feat: add worker artifact retention profiles`
+9. `perf: skip optional diagnostic artifact encoding`
+10. `perf: upload item artifacts with bounded concurrency`
+11. build/deploy/benchmark Checkpoint C
+12. `docs: record final worker throughput baseline`
 
 For every worker image:
 
@@ -754,7 +663,7 @@ For every worker image:
 Follow `aws-worker-image-deployment-and-gpu-acceptance-runbook.md`; do not directly mutate a running
 Batch job or manually launch an EC2 instance.
 
-## 15. Rollback
+## 14. Rollback
 
 Rollback must be possible at every checkpoint:
 
@@ -767,13 +676,11 @@ Rollback must be possible at every checkpoint:
 - If a worker attempt fails, do not automatically retry before recording job ID, provider job ID,
   image digest, config checksum, exit code, log stream, marker inventory, and current GPU state.
 
-## 16. Risks and mitigations
+## 15. Risks and mitigations
 
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
 | Timing code changes hot paths | Measurement distorts baseline | One event per item, monotonic in-memory spans, Checkpoint A overhead gate |
-| Wrong CUDA extension is compiled | Larger image with no speed benefit | T3 ownership proof, exact import probe, A/B detection timings |
-| CUDA ABI mismatch | Import/runtime failure | Digest-pinned devel builder matching PyTorch CUDA 12.1 and GPU acceptance |
 | Prefetch increases memory | Worker OOM | Depth 1 default, depth 2 maximum until measured, explicit ownership/close tests |
 | GCS client is shared unsafely | Intermittent corruption/failures | Thread-confined storage adapter per I/O worker |
 | Async failure is lost | False successful marker | Join every future, marker-last assertions, failure injection |
@@ -782,13 +689,12 @@ Rollback must be possible at every checkpoint:
 | Mean improves but tail worsens | Poor large-job reliability | Three-run p50/p95 gates and fixed workload mix |
 | Full GPU concurrency is attempted | T4 OOM | Main-thread GPU ownership test and no concurrent `process_one` calls |
 
-## 17. Definition of done
+## 16. Definition of done
 
-All four tasks are complete only when:
+All planned workstreams are complete only when:
 
 - every item emits a complete safe timing event;
 - the timing analyzer produces deterministic p50/p95 evidence;
-- the custom extension loads through its compiled path or is explicitly rejected as non-beneficial;
 - input and output overlap remain bounded and preserve all replay/marker invariants;
 - essential artifact mode avoids generating omitted diagnostics;
 - artifact writes are bounded, deterministic, and marker-last;
@@ -798,7 +704,7 @@ All four tasks are complete only when:
 - the timing baseline document is updated with the new job IDs and metrics; and
 - AWS Batch and GPU EC2 capacity are verified idle after the final run.
 
-## 18. Handoff instructions for the implementing agent
+## 17. Handoff instructions for the implementing agent
 
 1. Read the authoritative agent guide and current-state rules before acting.
 2. Read this plan, the timing baseline, the bulk-processing plan, and the worker-image deployment
