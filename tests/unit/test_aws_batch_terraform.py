@@ -34,13 +34,16 @@ def test_a6_network_has_public_egress_without_inbound_or_idle_nat_cost() -> None
     assert 'to_port=443' in compact
 
 
-def test_a6_compute_is_single_instance_class_and_zero_at_idle() -> None:
+def test_a6_compute_uses_blue_green_ordered_gpu_fallback_and_zero_at_idle() -> None:
     text = terraform_text()
     compact = compact_terraform_text()
 
     assert 'resource "aws_batch_compute_environment" "gpu"' in text
     assert 'allocation_strategy="BEST_FIT"' in compact
     assert 'instance_type=["g4dn.xlarge"]' in compact
+    assert 'resource "aws_batch_compute_environment" "gpu_fallback"' in text
+    assert 'allocation_strategy="BEST_FIT_PROGRESSIVE_ORDERED"' in compact
+    assert 'instance_type=["g4dn.xlarge","g5.xlarge","g6.xlarge"]' in compact
     assert 'min_vcpus=0' in compact
     assert 'desired_vcpus=0' in compact
     assert 'max_vcpus=4' in compact
@@ -71,6 +74,10 @@ def test_a6_queue_stays_disabled_by_default() -> None:
     assert 'resource "aws_batch_job_queue" "gpu"' in text
     assert 'state=var.batch_queue_enabled?"ENABLED":"DISABLED"' in compact
     assert 'priority=1' in compact
+    assert (
+        'compute_environment=aws_batch_compute_environment.gpu_fallback.arn'
+        in compact
+    )
 
 
 def test_a6_job_definition_is_digest_gated_and_gpu_bounded() -> None:
@@ -98,10 +105,10 @@ def test_a6_job_definition_is_digest_gated_and_gpu_bounded() -> None:
     assert 'value="/tmp/watermark-worker/cache"' in compact
 
 
-def test_bulk_job_definition_keeps_g4dn_and_has_a_bounded_24_hour_retry_envelope() -> None:
+def test_bulk_job_definition_uses_gpu_fallback_and_has_a_bounded_24_hour_retry_envelope() -> None:
     compact = compact_terraform_text()
 
-    assert 'instance_type=["g4dn.xlarge"]' in compact
+    assert 'instance_type=["g4dn.xlarge","g5.xlarge","g6.xlarge"]' in compact
     assert 'resource"aws_batch_job_definition""gpu_worker_bulk"' in compact
     assert 'name="${local.batch_job_name}-bulk"' in compact
     assert 'PIPELINE_CONFIG="/app/configs/watermark-bulk-v1.yaml"' in compact

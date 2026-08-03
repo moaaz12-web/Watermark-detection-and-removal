@@ -84,6 +84,52 @@ resource "aws_batch_compute_environment" "gpu" {
   ]
 }
 
+# AWS Batch cannot safely update a BEST_FIT compute environment to an ordered
+# allocation strategy in place. Keep the original environment as an idle rollback
+# resource and route new jobs only to this green environment. All listed shapes are
+# x86_64, one-GPU, four-vCPU instances; the T4 remains the preferred pool.
+resource "aws_batch_compute_environment" "gpu_fallback" {
+  name         = "${local.batch_compute_name}-fallback"
+  type         = "MANAGED"
+  state        = var.batch_queue_enabled ? "ENABLED" : "DISABLED"
+  service_role = aws_iam_service_linked_role.batch.arn
+
+  compute_resources {
+    type                = "EC2"
+    allocation_strategy = "BEST_FIT_PROGRESSIVE_ORDERED"
+    instance_type       = ["g4dn.xlarge", "g5.xlarge", "g6.xlarge"]
+    min_vcpus           = 0
+    desired_vcpus       = 0
+    max_vcpus           = 4
+
+    instance_role      = aws_iam_instance_profile.batch.arn
+    security_group_ids = [aws_security_group.batch.id]
+    subnets            = aws_subnet.batch_public[*].id
+
+    ec2_configuration {
+      image_type = "ECS_AL2023_NVIDIA"
+    }
+
+    launch_template {
+      launch_template_id = aws_launch_template.batch_gpu.id
+      version            = tostring(aws_launch_template.batch_gpu.latest_version)
+    }
+
+    tags = merge(local.common_tags, {
+      Name      = "${local.name_prefix}-batch-gpu-fallback"
+      Component = "gpu-batch-compute"
+    })
+  }
+
+  tags = {
+    Component = "gpu-batch-compute"
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.batch_instance_ecs,
+  ]
+}
+
 resource "aws_batch_job_queue" "gpu" {
   name     = local.batch_queue_name
   state    = var.batch_queue_enabled ? "ENABLED" : "DISABLED"
@@ -91,7 +137,7 @@ resource "aws_batch_job_queue" "gpu" {
 
   compute_environment_order {
     order               = 1
-    compute_environment = aws_batch_compute_environment.gpu.arn
+    compute_environment = aws_batch_compute_environment.gpu_fallback.arn
   }
 
   tags = {
