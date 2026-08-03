@@ -19,6 +19,7 @@ and then jump to the relevant section:
 | Understand authentication and trust | [Authentication and connection paths](docs/productionization/00-hybrid-watermark-system-agent-guide.md#8-authentication-and-connection-paths) |
 | Understand FastAPI routes and states | [Public FastAPI API](docs/productionization/00-hybrid-watermark-system-agent-guide.md#9-public-fastapi-watermark-api) and [job lifecycle](docs/productionization/00-hybrid-watermark-system-agent-guide.md#10-job-lifecycle) |
 | Build or deploy code/infrastructure | [Build and deployment paths](docs/productionization/00-hybrid-watermark-system-agent-guide.md#12-build-deploy-and-infrastructure-paths) |
+| Change or deploy AWS Terraform infrastructure | [Terraform infrastructure-change deployment runbook](docs/productionization/16-terraform-infrastructure-change-deployment-runbook.md) |
 | Build, deploy, or accept an AWS GPU worker image | [AWS worker image deployment and GPU acceptance runbook](docs/productionization/aws-worker-image-deployment-and-gpu-acceptance-runbook.md) |
 | Inspect logs or diagnose a job | [Safe observability](docs/productionization/00-hybrid-watermark-system-agent-guide.md#13-safe-observability) |
 | Analyze a completed job's timings from its `wm_...` ID | [Job metrics and timing-analysis runbook](docs/productionization/15-job-metrics-and-timing-analysis-runbook.md) |
