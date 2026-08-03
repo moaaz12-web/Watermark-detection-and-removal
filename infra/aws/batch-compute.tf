@@ -89,9 +89,12 @@ resource "aws_batch_compute_environment" "gpu" {
 # resource and route new jobs only to this green environment. All listed shapes are
 # x86_64, one-GPU, four-vCPU instances; the T4 remains the preferred pool.
 resource "aws_batch_compute_environment" "gpu_fallback" {
-  name         = "${local.batch_compute_name}-fallback"
-  type         = "MANAGED"
-  state        = var.batch_queue_enabled ? "ENABLED" : "DISABLED"
+  name = "${local.batch_compute_name}-fallback"
+  type = "MANAGED"
+  # AWS Batch requires a new managed compute environment to be created ENABLED.
+  # The queue is the deployment safety gate: while it is disabled, no job can
+  # request capacity and this scale-to-zero environment remains cost-free.
+  state        = "ENABLED"
   service_role = aws_iam_service_linked_role.batch.arn
 
   compute_resources {

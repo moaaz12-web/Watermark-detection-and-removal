@@ -37,11 +37,15 @@ def test_a6_network_has_public_egress_without_inbound_or_idle_nat_cost() -> None
 def test_a6_compute_uses_blue_green_ordered_gpu_fallback_and_zero_at_idle() -> None:
     text = terraform_text()
     compact = compact_terraform_text()
+    fallback = text.split(
+        'resource "aws_batch_compute_environment" "gpu_fallback"', maxsplit=1
+    )[1]
 
     assert 'resource "aws_batch_compute_environment" "gpu"' in text
     assert 'allocation_strategy="BEST_FIT"' in compact
     assert 'instance_type=["g4dn.xlarge"]' in compact
     assert 'resource "aws_batch_compute_environment" "gpu_fallback"' in text
+    assert 'state        = "ENABLED"' in fallback
     assert 'allocation_strategy="BEST_FIT_PROGRESSIVE_ORDERED"' in compact
     assert 'instance_type=["g4dn.xlarge","g5.xlarge","g6.xlarge"]' in compact
     assert 'min_vcpus=0' in compact
