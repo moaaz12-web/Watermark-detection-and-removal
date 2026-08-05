@@ -183,10 +183,13 @@ variable "pipeline_allowlist" {
       contains(var.pipeline_allowlist, "watermark-v1") &&
       alltrue([
         for pipeline in var.pipeline_allowlist :
-        contains(["watermark-v1", "watermark-bulk-v1"], pipeline)
+        contains(
+          ["watermark-v1", "watermark-bulk-v1", "watermark-v2", "watermark-bulk-v2"],
+          pipeline,
+        )
       ])
     )
-    error_message = "pipeline_allowlist must contain watermark-v1 and may additionally contain only watermark-bulk-v1."
+    error_message = "pipeline_allowlist must contain watermark-v1 and use only the versioned watermark pipeline identities."
   }
 }
 

@@ -50,6 +50,8 @@ locals {
   batch_job_definition_arns = {
     "watermark-v1"      = try(aws_batch_job_definition.gpu_worker[0].arn, "")
     "watermark-bulk-v1" = try(aws_batch_job_definition.gpu_worker_bulk[0].arn, "")
+    "watermark-v2"      = try(aws_batch_job_definition.gpu_worker_v2[0].arn, "")
+    "watermark-bulk-v2" = try(aws_batch_job_definition.gpu_worker_bulk_v2[0].arn, "")
   }
 
   common_tags = {

@@ -57,7 +57,12 @@ class BackgroundRemovalStage(Protocol):
 
 
 class DetectionStage(Protocol):
-    def run(self, detector_image: Image.Image) -> DetectionOutput: ...
+    def run(
+        self,
+        detector_image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> DetectionOutput: ...
 
     def close(self) -> None: ...
 
@@ -168,7 +173,10 @@ class PipelineExecutor:
         try:
             try:
                 with timing.measure("detectionMilliseconds"):
-                    detection = self.detection.run(background.detector_image)
+                    detection = self.detection.run(
+                        background.detector_image,
+                        original_image=item.source_image,
+                    )
             except Exception as exc:
                 return _failed_outcome(
                     item=item,

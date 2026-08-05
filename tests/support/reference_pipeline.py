@@ -62,7 +62,12 @@ class ReferenceDetectionStage:
         self.calls = 0
         self.closed = 0
 
-    def run(self, detector_image: Image.Image) -> DetectionOutput:
+    def run(
+        self,
+        detector_image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> DetectionOutput:
         self.calls += 1
         width, height = detector_image.size
         detected = BinaryMask(

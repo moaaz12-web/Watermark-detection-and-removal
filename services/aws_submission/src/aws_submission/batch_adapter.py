@@ -238,6 +238,8 @@ _AWS_BATCH_STATUSES = frozenset(
 _PIPELINE_CONFIGS = {
     "watermark-v1": "/app/configs/watermark-v1.yaml",
     "watermark-bulk-v1": "/app/configs/watermark-bulk-v1.yaml",
+    "watermark-v2": "/app/configs/watermark-v2.yaml",
+    "watermark-bulk-v2": "/app/configs/watermark-bulk-v2.yaml",
 }
 
 

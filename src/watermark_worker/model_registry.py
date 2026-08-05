@@ -331,6 +331,8 @@ def selected_stage_definitions(config: PipelineConfig) -> list[ModelStageDefinit
         detection_artifacts.append(config.detection.yolo.model_artifact_id)
     if config.detection.grounding_dino.enabled:
         detection_artifacts.append(config.detection.grounding_dino.model_artifact_id)
+    if config.detection.easyocr is not None and config.detection.easyocr.enabled:
+        detection_artifacts.append(config.detection.easyocr.model_artifact_id)
     return [
         ModelStageDefinition(
             name="background_removal",

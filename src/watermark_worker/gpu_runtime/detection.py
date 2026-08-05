@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from watermark_worker.production_executor import DetectionModelArtifacts
 
 Box = tuple[float, float, float, float]
+Polygon = tuple[tuple[float, float], ...]
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,8 @@ class RawDetection:
     class_name: str
     confidence: float
     box_xyxy: Box
+    text: str | None = None
+    polygon: Polygon | None = None
 
 
 class ObjectDetector(Protocol):
@@ -45,6 +49,14 @@ class BoxSegmenter(Protocol):
     ) -> tuple[tuple[Image.Image, float], ...]: ...
 
     def close(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class _PendingDetection:
+    detector: str
+    detection: RawDetection
+    sources: tuple[str, ...]
+    evidence: tuple[dict[str, object], ...]
 
 
 def normalize_grounding_prompt(text_prompt: str) -> str:
@@ -208,6 +220,83 @@ class YoloBoxDetector:
         self._release()
 
 
+class EasyOcrBoxDetector:
+    name = "easyocr_sam2"
+
+    def __init__(
+        self,
+        *,
+        reader: Any,
+        numpy_module: Any,
+        confidence: float,
+        min_region_size_pixels: int,
+        box_padding_pixels: int = 0,
+        release: Callable[[], None] = lambda: None,
+    ) -> None:
+        self._reader = reader
+        self._numpy = numpy_module
+        self._confidence = confidence
+        self._min_region_size_pixels = min_region_size_pixels
+        self._box_padding_pixels = box_padding_pixels
+        self._release = release
+        self._closed = False
+
+    def predict_boxes(self, image: Image.Image) -> tuple[RawDetection, ...]:
+        if self._closed:
+            raise ModelValidationError("EasyOCR was used after it was released")
+        source = image.convert("RGB")
+        results = self._reader.readtext(
+            self._numpy.asarray(source),
+            detail=1,
+            paragraph=False,
+        )
+        detections: list[RawDetection] = []
+        for result in results:
+            if not isinstance(result, (list, tuple)) or len(result) != 3:
+                raise ModelValidationError("EasyOCR returned an invalid result")
+            polygon_value, text_value, score_value = result
+            if not isinstance(text_value, str) or not text_value.strip():
+                continue
+            try:
+                score = float(score_value)
+            except (TypeError, ValueError) as exc:
+                raise ModelValidationError("EasyOCR returned an invalid confidence") from exc
+            if not math.isfinite(score) or score < self._confidence:
+                continue
+            polygon, box = _clamp_polygon(
+                polygon_value,
+                source.width,
+                source.height,
+            )
+            if polygon is None or box is None:
+                continue
+            if min(box[2] - box[0], box[3] - box[1]) < self._min_region_size_pixels:
+                continue
+            box = _pad_box(
+                box,
+                self._box_padding_pixels,
+                source.width,
+                source.height,
+            )
+            detections.append(
+                RawDetection(
+                    class_name="text",
+                    confidence=score,
+                    box_xyxy=box,
+                    text=text_value.strip(),
+                    polygon=polygon,
+                )
+            )
+        return tuple(detections)
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._reader = None
+        self._release()
+
+
 class Sam2BoxSegmenter:
     def __init__(
         self,
@@ -272,7 +361,12 @@ def _to_list(value: Any) -> list[Any]:
 def _clamp_box(value: Any, width: int, height: int) -> Box | None:
     if len(value) != 4:
         raise ModelValidationError("detector box must contain four coordinates")
-    x1, y1, x2, y2 = (float(item) for item in value)
+    try:
+        x1, y1, x2, y2 = (float(item) for item in value)
+    except (TypeError, ValueError) as exc:
+        raise ModelValidationError("detector box coordinates must be numeric") from exc
+    if not all(math.isfinite(value) for value in (x1, y1, x2, y2)):
+        raise ModelValidationError("detector box coordinates must be finite")
     clamped = (
         max(0.0, min(x1, float(width))),
         max(0.0, min(y1, float(height))),
@@ -282,6 +376,56 @@ def _clamp_box(value: Any, width: int, height: int) -> Box | None:
     if clamped[2] <= clamped[0] or clamped[3] <= clamped[1]:
         return None
     return clamped
+
+
+def _clamp_polygon(
+    value: Any,
+    width: int,
+    height: int,
+) -> tuple[Polygon | None, Box | None]:
+    if not isinstance(value, (list, tuple)) or len(value) != 4:
+        raise ModelValidationError("EasyOCR polygon must contain four points")
+    points: list[tuple[float, float]] = []
+    for point in value:
+        if not isinstance(point, (list, tuple)) or len(point) != 2:
+            raise ModelValidationError("EasyOCR polygon point must contain two coordinates")
+        try:
+            x, y = (float(item) for item in point)
+        except (TypeError, ValueError) as exc:
+            raise ModelValidationError("EasyOCR polygon coordinates must be numeric") from exc
+        if not math.isfinite(x) or not math.isfinite(y):
+            raise ModelValidationError("EasyOCR polygon coordinates must be finite")
+        points.append(
+            (
+                max(0.0, min(x, float(width))),
+                max(0.0, min(y, float(height))),
+            )
+        )
+    polygon = tuple(points)
+    box = _clamp_box(
+        (
+            min(x for x, _ in polygon),
+            min(y for _, y in polygon),
+            max(x for x, _ in polygon),
+            max(y for _, y in polygon),
+        ),
+        width,
+        height,
+    )
+    if box is None:
+        return None, None
+    return polygon, box
+
+
+def _pad_box(box: Box, padding: int, width: int, height: int) -> Box:
+    if padding <= 0:
+        return box
+    return (
+        max(0.0, box[0] - padding),
+        max(0.0, box[1] - padding),
+        min(float(width), box[2] + padding),
+        min(float(height), box[3] + padding),
+    )
 
 
 class CombinedDetectionRuntime:
@@ -298,37 +442,76 @@ class CombinedDetectionRuntime:
         self._segmenter = segmenter
         self._closed = False
 
-    def predict(self, image: Image.Image) -> tuple[DetectionPrediction, ...]:
+    def predict(
+        self,
+        image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> tuple[DetectionPrediction, ...]:
         if self._closed:
             raise ModelValidationError("detection runtime was used after it was released")
         source = image.convert("RGB")
-        pending: list[tuple[str, RawDetection]] = []
+        if original_image is not None and original_image.size != source.size:
+            raise ModelValidationError(
+                "original image dimensions do not match the detector image"
+            )
+        ocr_source = (
+            original_image.convert("RGB") if original_image is not None else source
+        )
+        pending: list[_PendingDetection] = []
         for detector in self._detectors:
-            pending.extend((detector.name, item) for item in detector.predict_boxes(source))
+            detector_source = ocr_source if detector.name == "easyocr_sam2" else source
+            for item in detector.predict_boxes(detector_source):
+                evidence = (
+                    {
+                        "detector": detector.name,
+                        "className": item.class_name,
+                        "confidence": item.confidence,
+                        "boxXyxy": list(item.box_xyxy),
+                        "text": item.text,
+                        "polygon": [list(point) for point in item.polygon]
+                        if item.polygon is not None
+                        else None,
+                    },
+                )
+                pending.append(
+                    _PendingDetection(
+                        detector=detector.name,
+                        detection=item,
+                        sources=(
+                            "easyocr" if detector.name == "easyocr_sam2" else detector.name,
+                        ),
+                        evidence=evidence,
+                    )
+                )
         if not pending:
             return ()
 
         segmented = self._segmenter.predict_masks(
             source,
-            tuple(item.box_xyxy for _, item in pending),
+            tuple(item.detection.box_xyxy for item in pending),
         )
         if len(segmented) != len(pending):
             raise ModelValidationError("SAM 2 must return exactly one mask per detection")
 
         predictions: list[DetectionPrediction] = []
-        for (detector_name, detection), (mask, sam_score) in zip(
+        for pending_item, (mask, sam_score) in zip(
             pending, segmented, strict=True
         ):
             if mask.size != source.size:
                 raise ModelValidationError("SAM 2 mask dimensions do not match the source image")
             predictions.append(
                 DetectionPrediction(
-                    detector=detector_name,
-                    class_name=detection.class_name,
-                    confidence=detection.confidence,
-                    box_xyxy=detection.box_xyxy,
+                    detector=pending_item.detector,
+                    class_name=pending_item.detection.class_name,
+                    confidence=pending_item.detection.confidence,
+                    box_xyxy=pending_item.detection.box_xyxy,
                     mask=mask.convert("L"),
                     sam_score=sam_score,
+                    text=pending_item.detection.text,
+                    polygon=pending_item.detection.polygon,
+                    sources=pending_item.sources,
+                    evidence=pending_item.evidence,
                 )
             )
         return tuple(predictions)
@@ -381,6 +564,27 @@ def load_local_detection_runtime(
                 prompt=config.grounding_dino.prompt,
                 box_threshold=config.grounding_dino.box_threshold,
                 text_threshold=config.grounding_dino.text_threshold,
+                release=lambda: release_cuda_memory(torch_module),
+            )
+        )
+
+    if config.easyocr is not None and config.easyocr.enabled:
+        if artifacts.easyocr is None:
+            raise ModelValidationError("EasyOCR is enabled but its artifact is unavailable")
+        easyocr = import_runtime_module("easyocr")
+        numpy_module = import_runtime_module("numpy")
+        detectors.append(
+            EasyOcrBoxDetector(
+                reader=easyocr.Reader(
+                    list(config.easyocr.languages),
+                    gpu=device,
+                    model_storage_directory=str(artifacts.easyocr.runtime_path),
+                    download_enabled=False,
+                ),
+                numpy_module=numpy_module,
+                confidence=config.easyocr.confidence,
+                min_region_size_pixels=config.easyocr.min_region_size_pixels,
+                box_padding_pixels=config.easyocr.box_padding_pixels,
                 release=lambda: release_cuda_memory(torch_module),
             )
         )

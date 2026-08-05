@@ -1,0 +1,68 @@
+schema_version: 1
+pipeline_version: watermark-v2
+
+background_removal:
+  enabled: true
+  detector_input: white_background
+  final_image_input: source_original
+  model_artifact_id: rmbg-edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6
+  model_input_size: [1024, 1024]
+
+detection:
+  mode: combined
+  yolo:
+    enabled: true
+    model_artifact_id: yolo-80b022e94239a65a3b50173096523f202ca39608b9063dd391d043323a51326e
+    confidence: 0.35
+    iou: 0.50
+    image_size: 1024
+    augment: true
+  grounding_dino:
+    enabled: true
+    model_artifact_id: grounding-dino-c20fcbe1eaa4bb99377ae9a2746a10cb20a3c200772fdd4c423bd84643b7f77d
+    prompt: "watermark, logo, brand logo, text, label, sticker, stamp, copyright notice, graphic overlay, promotiona text, ecommerce text, commercial messaging, shipping text, discount offer"
+    box_threshold: 0.35
+    text_threshold: 0.55
+  easyocr:
+    enabled: true
+    model_artifact_id: easyocr-24ae1d245198dc3866f0ec72c77212fa64be2b1a322642fefcf6e7c3196b103d
+    languages: [en]
+    confidence: 0.35
+    min_region_size_pixels: 10
+    box_padding_pixels: 2
+
+segmentation:
+  model_artifact_id: sam2-2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318
+  config_file: configs/sam2.1/sam2.1_hiera_l.yaml
+
+safety_gate:
+  enabled: true
+  failure_policy: block_unverified
+  per_detection_block: 0.40
+  combined_warn: 0.25
+  combined_block: 0.55
+  min_product_area_pixels: 500
+
+inpainting:
+  model_artifact_id: lama-f1b358ca24093b93a106183b98a3dea6e8ed09f3b43ea7251eb2c81e7b4575f6
+  input: source_original
+  mask_dilation_pixels: 2
+  mask_threshold: 127
+
+limits:
+  maximum_items: 5
+  maximum_compressed_bytes: 10000000
+  maximum_width: 4096
+  maximum_height: 4096
+  maximum_pixels: 16000000
+  allowed_formats:
+    - PNG
+    - JPEG
+    - WEBP
+
+storage:
+  allowed_manifest_buckets:
+    - project-5909a738-2fdc-451e-ad6-watermark-data
+  allowed_input_buckets:
+    - project-5909a738-2fdc-451e-ad6-watermark-data
+  output_bucket: project-5909a738-2fdc-451e-ad6-watermark-data

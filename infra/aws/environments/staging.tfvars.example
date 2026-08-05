@@ -14,7 +14,12 @@ approved_output_prefixes = [
   "gs://OWNER_SUPPLIED_DATA_BUCKET/account_",
 ]
 
-pipeline_allowlist = ["watermark-v1", "watermark-bulk-v1"]
+pipeline_allowlist = [
+  "watermark-v1",
+  "watermark-bulk-v1",
+  "watermark-v2",
+  "watermark-bulk-v2",
+]
 submission_enabled = false
 batch_queue_enabled = false
 
@@ -29,6 +34,10 @@ gcs_worker_read_prefixes = [
   {
     bucket = "OWNER_SUPPLIED_MODEL_BUCKET"
     prefix = "watermark-v1/"
+  },
+  {
+    bucket = "OWNER_SUPPLIED_MODEL_BUCKET"
+    prefix = "watermark-v2/"
   },
 ]
 

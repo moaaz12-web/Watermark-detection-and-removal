@@ -60,6 +60,7 @@ def test_gpu_image_build_verifies_runtime_without_claiming_gpu_acceptance() -> N
         "torchvision",
         "transformers",
         "ultralytics",
+        "easyocr",
         "pkg_resources",
         "sam2",
         "saicinpainting",

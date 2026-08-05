@@ -90,14 +90,30 @@ class GroundingDinoConfig(StrictConfigModel):
     _artifact_id = field_validator("model_artifact_id")(_validate_artifact_id)
 
 
+class EasyOcrConfig(StrictConfigModel):
+    enabled: Literal[True]
+    model_artifact_id: ModelArtifactId
+    languages: tuple[Literal["en"], ...] = Field(min_length=1)
+    confidence: float = Field(ge=0.35, le=1)
+    min_region_size_pixels: int = Field(ge=1)
+    box_padding_pixels: int = Field(ge=0)
+
+    _artifact_id = field_validator("model_artifact_id")(_validate_artifact_id)
+
+
 class DetectionConfig(StrictConfigModel):
     mode: Literal["combined", "yolo", "grounding_dino"]
     yolo: YoloConfig
     grounding_dino: GroundingDinoConfig
+    easyocr: EasyOcrConfig | None = None
 
     @model_validator(mode="after")
     def require_detector(self) -> DetectionConfig:
-        if not self.yolo.enabled and not self.grounding_dino.enabled:
+        if (
+            not self.yolo.enabled
+            and not self.grounding_dino.enabled
+            and self.easyocr is None
+        ):
             raise ValueError("at least one detector must be enabled")
         if self.mode == "yolo" and not self.yolo.enabled:
             raise ValueError("detection.mode yolo requires the YOLO stage")
@@ -201,6 +217,8 @@ class PipelineConfig(StrictConfigModel):
             artifact_ids.add(self.detection.yolo.model_artifact_id)
         if self.detection.grounding_dino.enabled:
             artifact_ids.add(self.detection.grounding_dino.model_artifact_id)
+        if self.detection.easyocr is not None and self.detection.easyocr.enabled:
+            artifact_ids.add(self.detection.easyocr.model_artifact_id)
         return artifact_ids
 
 

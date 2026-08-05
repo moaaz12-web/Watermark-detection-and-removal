@@ -34,6 +34,10 @@ class DetectionPrediction:
     box_xyxy: tuple[float, float, float, float]
     mask: Image.Image
     sam_score: float
+    text: str | None = None
+    polygon: tuple[tuple[float, float], ...] | None = None
+    sources: tuple[str, ...] = ()
+    evidence: tuple[dict[str, object], ...] = ()
 
 
 class RmbgRuntime(Protocol):
@@ -43,7 +47,12 @@ class RmbgRuntime(Protocol):
 
 
 class DetectionRuntime(Protocol):
-    def predict(self, image: Image.Image) -> tuple[DetectionPrediction, ...]: ...
+    def predict(
+        self,
+        image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> tuple[DetectionPrediction, ...]: ...
 
     def close(self) -> None: ...
 
@@ -133,9 +142,14 @@ class ProductionDetectionStage:
         self.runtime = _LazyRuntime(runtime_factory)
         self.artifact_profile = artifact_profile
 
-    def run(self, detector_image: Image.Image) -> DetectionOutput:
+    def run(
+        self,
+        detector_image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> DetectionOutput:
         image = detector_image.convert("RGB")
-        detected = self.runtime.get().predict(image)
+        detected = self.runtime.get().predict(image, original_image=original_image)
         masks: list[BinaryMask] = []
         artifacts: list[StageArtifact] = []
         rows: list[dict[str, object]] = []
@@ -165,6 +179,24 @@ class ProductionDetectionStage:
                     "confidence": prediction.confidence,
                     "boxXyxy": list(prediction.box_xyxy),
                     "samScore": prediction.sam_score,
+                    **(
+                        {
+                            "text": prediction.text,
+                            "polygon": [list(point) for point in prediction.polygon],
+                        }
+                        if prediction.text is not None and prediction.polygon is not None
+                        else {}
+                    ),
+                    **(
+                        {"sources": list(prediction.sources)}
+                        if prediction.text is not None or len(prediction.sources) > 1
+                        else {}
+                    ),
+                    **(
+                        {"evidence": list(prediction.evidence)}
+                        if len(prediction.evidence) > 1 or len(prediction.sources) > 1
+                        else {}
+                    ),
                     **(
                         {"maskArtifact": mask_name}
                         if self.artifact_profile is ArtifactProfile.FULL

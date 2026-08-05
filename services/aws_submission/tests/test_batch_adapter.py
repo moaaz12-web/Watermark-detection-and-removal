@@ -125,6 +125,37 @@ def test_bulk_submission_selects_only_the_bulk_definition_and_config() -> None:
 
 
 @pytest.mark.parametrize(
+    ("pipeline_version", "config_path"),
+    [
+        ("watermark-v2", "/app/configs/watermark-v2.yaml"),
+        ("watermark-bulk-v2", "/app/configs/watermark-bulk-v2.yaml"),
+    ],
+)
+def test_ocr_v2_submission_selects_only_its_packaged_configuration(
+    pipeline_version: str, config_path: str
+) -> None:
+    client = RecordingBatchClient()
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arns={
+            pipeline_version: (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                f"job-definition/watermark-staging-{pipeline_version}:1"
+            )
+        },
+    )
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload["pipelineVersion"] = pipeline_version
+    request = SubmitRequest.model_validate(payload)
+
+    adapter.submit(request, "watermark-wm-123", "f" * 64)
+
+    assert client.submission is not None
+    assert client.submission["parameters"]["PIPELINE_CONFIG"] == config_path
+
+
+@pytest.mark.parametrize(
     ("aws_status", "expected_status"),
     [
         ("SUBMITTED", ProviderStatus.SUBMITTED),

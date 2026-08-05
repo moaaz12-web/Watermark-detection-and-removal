@@ -14,7 +14,7 @@ def test_gpu_runtime_candidates_are_exact_and_immutable() -> None:
     candidates = tomllib.loads(CANDIDATES_PATH.read_text(encoding="utf-8"))
 
     assert candidates["schema_version"] == 1
-    assert candidates["status"] == "cpu-image-verified"
+    assert candidates["status"] == "requires-image-reverification"
     assert candidates["python"] == "3.11"
     assert candidates["cuda"] == "12.1"
     assert candidates["packages"]["transformers"] == "4.44.2"

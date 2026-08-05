@@ -42,14 +42,20 @@ def test_versioned_fixtures_validate() -> None:
     ErrorEnvelope.model_validate(fixture("error-response.json"))
 
 
-def test_submit_request_accepts_only_the_small_and_bulk_pipeline_identities() -> None:
+@pytest.mark.parametrize(
+    "pipeline_version",
+    ["watermark-v1", "watermark-bulk-v1", "watermark-v2", "watermark-bulk-v2"],
+)
+def test_submit_request_accepts_only_server_defined_pipeline_identities(
+    pipeline_version: str,
+) -> None:
     payload = fixture("submit-request.json")
-    payload["pipelineVersion"] = "watermark-bulk-v1"
-    bulk = SubmitRequest.model_validate(payload)
+    payload["pipelineVersion"] = pipeline_version
+    request = SubmitRequest.model_validate(payload)
 
-    assert bulk.pipeline_version == "watermark-bulk-v1"
+    assert request.pipeline_version == pipeline_version
 
-    payload["pipelineVersion"] = "watermark-bulk-v2"
+    payload["pipelineVersion"] = "watermark-v3"
     with pytest.raises(ValidationError, match="pipelineVersion"):
         SubmitRequest.model_validate(payload)
 

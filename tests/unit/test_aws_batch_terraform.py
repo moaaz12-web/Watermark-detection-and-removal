@@ -116,6 +116,8 @@ def test_bulk_job_definition_uses_gpu_fallback_and_has_a_bounded_24_hour_retry_e
     assert 'resource"aws_batch_job_definition""gpu_worker_bulk"' in compact
     assert 'name="${local.batch_job_name}-bulk"' in compact
     assert 'PIPELINE_CONFIG="/app/configs/watermark-bulk-v1.yaml"' in compact
+    assert 'PIPELINE_CONFIG="/app/configs/watermark-v2.yaml"' in compact
+    assert 'PIPELINE_CONFIG="/app/configs/watermark-bulk-v2.yaml"' in compact
     assert '"--config","Ref::PIPELINE_CONFIG"' in compact
     assert (
         "container_properties=aws_batch_job_definition.gpu_worker[0].container_properties"

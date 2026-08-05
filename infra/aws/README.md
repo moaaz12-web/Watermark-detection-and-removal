@@ -11,7 +11,7 @@ worker images inside AWS from a small operator-uploaded source ZIP. BuildKit sto
 in a separate mutable ECR cache repository; reviewed release tags remain in the immutable worker
 repository.
 
-When an image digest is configured, Terraform defines two trusted Batch execution profiles:
+When an image digest is configured, Terraform defines four trusted Batch execution profiles:
 
 - `watermark-v1`, capped by its packaged five-item configuration with a 90-minute timeout and one
   attempt; and
@@ -19,6 +19,10 @@ When an image digest is configured, Terraform defines two trusted Batch executio
   timeout and two attempts. The bulk definition retries EC2 host failures and worker exit codes
   `6` and `7`, which represent retryable storage and external-service failures. All other worker
   exits fail immediately.
+
+The OCR-enabled successors `watermark-v2` and `watermark-bulk-v2` use the same resource envelopes
+with their packaged EasyOCR configurations. They remain separately allowlisted so v1 jobs retain
+their historical detector behavior.
 
 The submission Lambda maps each exact pipeline identity to its dedicated job-definition ARN and
 packaged configuration path. A caller cannot supply an arbitrary job definition or configuration

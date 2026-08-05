@@ -58,10 +58,17 @@ class DetectorStage:
     def __init__(self, masks: tuple[BinaryMask, ...]) -> None:
         self.masks = masks
         self.calls: list[Image.Image] = []
+        self.original_images: list[Image.Image | None] = []
         self.closed = 0
 
-    def run(self, detector_image: Image.Image) -> DetectionOutput:
+    def run(
+        self,
+        detector_image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> DetectionOutput:
         self.calls.append(detector_image)
+        self.original_images.append(original_image)
         return DetectionOutput(detection_masks=self.masks, artifacts=())
 
     def close(self) -> None:
@@ -120,9 +127,14 @@ class LifecycleDetectionStage(DetectorStage):
     def initialize(self) -> None:
         self.events.append("initialize-detection")
 
-    def run(self, detector_image: Image.Image) -> DetectionOutput:
+    def run(
+        self,
+        detector_image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> DetectionOutput:
         self.events.append("run-detection")
-        return super().run(detector_image)
+        return super().run(detector_image, original_image=original_image)
 
     def close(self) -> None:
         self.events.append("close-detection")
@@ -177,12 +189,32 @@ class CountingDetectionStage:
     def initialize(self) -> None:
         self.initialized += 1
 
-    def run(self, detector_image: Image.Image) -> DetectionOutput:
+    def run(
+        self,
+        detector_image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> DetectionOutput:
         self.processed += 1
         return DetectionOutput(detection_masks=(), artifacts=())
 
     def close(self) -> None:
         self.closed += 1
+
+
+def test_executor_passes_original_source_alongside_background_detector_image() -> None:
+    source = source_image()
+    detection = DetectorStage(())
+    executor = PipelineExecutor(
+        background_removal=BackgroundStage(mask((0, 0))),
+        detection=detection,
+        inpainting=InpaintingStage(),
+        safety_gate=gate_config(),
+    )
+
+    executor.process_one(PipelineItem(item_id="asset_1", source_image=source))
+
+    assert detection.original_images == [source]
 
 
 class CountingInpaintingStage:

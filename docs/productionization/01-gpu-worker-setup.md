@@ -708,7 +708,8 @@ Local implementation checkpoint (2026-07-18):
 - The binary safety mask uses an immutable one-byte-per-pixel raster. This bounds a 16-megapixel
   mask at about 16 MB of mask payload instead of representing millions of Python coordinate tuples.
 - `gpu-runtime-candidates.toml` records the exact image dependency versions and pins the SAM 2 and
-  LaMa source revisions to immutable commit SHAs. It is marked `cpu-image-verified`: the remote
+  LaMa source revisions to immutable commit SHAs. It is marked `requires-image-reverification`
+  after the EasyOCR dependency was added; the remote
   CPU build resolved a hash-locked environment and passed import/ABI and read-only CLI checks, but
   it is not GPU-accepted and must not be treated as a production release image.
 - The RMBG runtime uses Transformers with `local_files_only=True` and `trust_remote_code=True`

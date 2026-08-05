@@ -190,3 +190,85 @@ resource "aws_batch_job_definition" "gpu_worker_bulk" {
     aws_iam_role_policy_attachment.batch_execution,
   ]
 }
+
+resource "aws_batch_job_definition" "gpu_worker_v2" {
+  count = local.batch_image_ready ? 1 : 0
+
+  name                  = "${local.batch_job_name}-v2"
+  type                  = "container"
+  platform_capabilities = ["EC2"]
+  propagate_tags        = true
+
+  parameters = merge(local.batch_worker_parameters, {
+    PIPELINE_CONFIG = "/app/configs/watermark-v2.yaml"
+  })
+
+  container_properties = local.batch_worker_container_properties
+
+  retry_strategy {
+    attempts = 1
+  }
+
+  timeout {
+    attempt_duration_seconds = 5400
+  }
+
+  tags = {
+    Component = "gpu-worker-v2-definition"
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.batch_execution,
+  ]
+}
+
+resource "aws_batch_job_definition" "gpu_worker_bulk_v2" {
+  count = local.batch_image_ready ? 1 : 0
+
+  name                  = "${local.batch_job_name}-bulk-v2"
+  type                  = "container"
+  platform_capabilities = ["EC2"]
+  propagate_tags        = true
+
+  parameters = merge(local.batch_worker_parameters, {
+    PIPELINE_CONFIG = "/app/configs/watermark-bulk-v2.yaml"
+  })
+
+  container_properties = local.batch_worker_container_properties
+
+  retry_strategy {
+    attempts = 2
+
+    evaluate_on_exit {
+      action           = "RETRY"
+      on_status_reason = "Host EC2*"
+    }
+
+    evaluate_on_exit {
+      action       = "RETRY"
+      on_exit_code = "6"
+    }
+
+    evaluate_on_exit {
+      action       = "RETRY"
+      on_exit_code = "7"
+    }
+
+    evaluate_on_exit {
+      action       = "EXIT"
+      on_exit_code = "*"
+    }
+  }
+
+  timeout {
+    attempt_duration_seconds = 86400
+  }
+
+  tags = {
+    Component = "gpu-worker-bulk-v2-definition"
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.batch_execution,
+  ]
+}

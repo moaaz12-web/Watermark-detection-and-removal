@@ -76,3 +76,8 @@ def test_submission_lambda_receives_exact_small_and_bulk_job_definitions() -> No
         '"watermark-bulk-v1"=try(aws_batch_job_definition.gpu_worker_bulk[0].arn,"")'
         in compact
     )
+    assert '"watermark-v2"=try(aws_batch_job_definition.gpu_worker_v2[0].arn,"")' in compact
+    assert (
+        '"watermark-bulk-v2"=try(aws_batch_job_definition.gpu_worker_bulk_v2[0].arn,"")'
+        in compact
+    )

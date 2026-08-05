@@ -73,7 +73,12 @@ class FakeRmbgRuntime:
 
 
 class FakeDetectionRuntime:
-    def predict(self, image: Image.Image) -> tuple[DetectionPrediction, ...]:
+    def predict(
+        self,
+        image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> tuple[DetectionPrediction, ...]:
         return ()
 
     def close(self) -> None:

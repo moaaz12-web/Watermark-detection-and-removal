@@ -109,6 +109,64 @@ def test_valid_config_is_hashed_and_exposes_manifest_policy(tmp_path) -> None:
     assert loaded.config.inpainting.input == "source_original"
 
 
+def test_ocr_config_accepts_the_inclusive_035_confidence_boundary(tmp_path) -> None:
+    payload = config_payload()
+    payload["detection"]["easyocr"] = {  # type: ignore[index]
+        "enabled": True,
+        "model_artifact_id": f"easyocr-{SHA_A}",
+        "languages": ["en"],
+        "confidence": 0.35,
+        "min_region_size_pixels": 10,
+        "box_padding_pixels": 2,
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_pipeline_config(path).config
+
+    assert loaded.detection.easyocr is not None
+    assert loaded.detection.easyocr.confidence == 0.35
+    assert loaded.detection.easyocr.languages == ("en",)
+    assert f"easyocr-{SHA_A}" in loaded.model_artifact_ids
+
+
+def test_ocr_config_rejects_confidence_below_035(tmp_path) -> None:
+    payload = config_payload()
+    payload["detection"]["easyocr"] = {  # type: ignore[index]
+        "enabled": True,
+        "model_artifact_id": f"easyocr-{SHA_A}",
+        "languages": ["en"],
+        "confidence": 0.349,
+        "min_region_size_pixels": 10,
+        "box_padding_pixels": 2,
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(InvalidConfigurationError, match="confidence"):
+        load_pipeline_config(path)
+
+
+def test_ocr_can_be_the_only_enabled_detector(tmp_path) -> None:
+    payload = config_payload()
+    payload["detection"]["yolo"]["enabled"] = False  # type: ignore[index]
+    payload["detection"]["grounding_dino"]["enabled"] = False  # type: ignore[index]
+    payload["detection"]["easyocr"] = {  # type: ignore[index]
+        "enabled": True,
+        "model_artifact_id": f"easyocr-{SHA_A}",
+        "languages": ["en"],
+        "confidence": 0.35,
+        "min_region_size_pixels": 10,
+        "box_padding_pixels": 2,
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_pipeline_config(path).config
+
+    assert loaded.detection.easyocr is not None
+
+
 def test_config_rejects_rmbg_as_final_inpainting_input(tmp_path) -> None:
     payload = config_payload()
     payload["inpainting"]["input"] = "white_background"  # type: ignore[index]
@@ -224,6 +282,29 @@ def test_selected_stage_definitions_contain_only_enabled_model_artifacts(tmp_pat
     ]
 
 
+def test_selected_stage_definitions_include_enabled_ocr_artifact(tmp_path) -> None:
+    payload = config_payload()
+    payload["detection"]["easyocr"] = {  # type: ignore[index]
+        "enabled": True,
+        "model_artifact_id": f"easyocr-{SHA_A}",
+        "languages": ["en"],
+        "confidence": 0.35,
+        "min_region_size_pixels": 10,
+        "box_padding_pixels": 2,
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    definitions = selected_stage_definitions(load_pipeline_config(path).config)
+
+    assert definitions[1].artifact_ids == (
+        f"sam-{SHA_A}",
+        f"yolo-{SHA_A}",
+        f"dino-{SHA_A}",
+        f"easyocr-{SHA_A}",
+    )
+
+
 def test_frozen_pipeline_v1_matches_its_model_manifest() -> None:
     loaded_config = load_pipeline_config(PROJECT_ROOT / "configs" / "watermark-v1.yaml")
     loaded_models = load_model_manifest(PROJECT_ROOT / "model-manifest.json")
@@ -264,3 +345,31 @@ def test_bulk_pipeline_uses_the_same_models_with_a_10000_item_limit() -> None:
     assert bulk.config.safety_gate == small.config.safety_gate
     assert bulk.config.inpainting == small.config.inpainting
     assert bulk.config.storage == small.config.storage
+
+
+@pytest.mark.parametrize(
+    ("config_name", "pipeline_version", "maximum_items"),
+    [
+        ("watermark-v2.yaml", "watermark-v2", 5),
+        ("watermark-bulk-v2.yaml", "watermark-bulk-v2", 10_000),
+    ],
+)
+def test_ocr_v2_pipelines_bind_easyocr_and_keep_v1_models_pinned(
+    config_name: str, pipeline_version: str, maximum_items: int
+) -> None:
+    loaded_config = load_pipeline_config(PROJECT_ROOT / "configs" / config_name)
+    loaded_models = load_model_manifest(PROJECT_ROOT / "model-manifest.json")
+
+    validate_model_bindings(loaded_config.config, loaded_models.manifest)
+
+    easyocr = loaded_config.config.detection.easyocr
+    assert easyocr is not None
+    assert loaded_config.config.pipeline_version == pipeline_version
+    assert loaded_config.config.limits.maximum_items == maximum_items
+    assert easyocr.confidence == 0.35
+    assert easyocr.languages == ("en",)
+    assert easyocr.model_artifact_id in loaded_config.config.model_artifact_ids
+    v1_artifacts = load_pipeline_config(
+        PROJECT_ROOT / "configs" / "watermark-v1.yaml"
+    ).config.model_artifact_ids
+    assert loaded_config.config.model_artifact_ids - {easyocr.model_artifact_id} == v1_artifacts

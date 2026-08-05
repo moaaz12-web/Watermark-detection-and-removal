@@ -130,7 +130,12 @@ class SubmitRequest(RequestModel):
     manifest_uri: GcsUri
     manifest_generation: Generation
     output_manifest_uri: GcsUri
-    pipeline_version: Literal["watermark-v1", "watermark-bulk-v1"]
+    pipeline_version: Literal[
+        "watermark-v1",
+        "watermark-bulk-v1",
+        "watermark-v2",
+        "watermark-bulk-v2",
+    ]
     request_sha256: Sha256
 
 

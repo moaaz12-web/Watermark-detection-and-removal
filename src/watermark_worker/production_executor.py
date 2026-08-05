@@ -46,6 +46,7 @@ class DetectionModelArtifacts:
     sam2: PreparedModelArtifact
     yolo: PreparedModelArtifact | None
     grounding_dino: PreparedModelArtifact | None
+    easyocr: PreparedModelArtifact | None = None
 
 
 class ProductionRuntimeProvider(Protocol):
@@ -108,10 +109,16 @@ def build_production_executor(
         if config.detection.grounding_dino.enabled
         else None
     )
+    easyocr = (
+        prepared[config.detection.easyocr.model_artifact_id]
+        if config.detection.easyocr is not None and config.detection.easyocr.enabled
+        else None
+    )
     detection_artifacts = DetectionModelArtifacts(
         sam2=sam2,
         yolo=yolo,
         grounding_dino=grounding_dino,
+        easyocr=easyocr,
     )
 
     return PipelineExecutor(

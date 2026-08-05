@@ -65,7 +65,12 @@ def test_background_stage_loads_lazily_and_emits_product_mask() -> None:
 class FakeDetectionRuntime:
     closed: bool = False
 
-    def predict(self, image: Image.Image) -> tuple[DetectionPrediction, ...]:
+    def predict(
+        self,
+        image: Image.Image,
+        *,
+        original_image: Image.Image | None = None,
+    ) -> tuple[DetectionPrediction, ...]:
         grounding_mask = Image.new("L", image.size, 0)
         grounding_mask.putpixel((0, 0), 255)
         yolo_mask = Image.new("L", image.size, 0)
@@ -117,6 +122,38 @@ def test_combined_detection_stage_preserves_each_sam_mask_and_metadata() -> None
         "grounding_dino",
         "yolo",
     ]
+
+
+def test_detection_stage_preserves_ocr_text_and_polygon_evidence() -> None:
+    class OcrRuntime:
+        def predict(
+            self,
+            image: Image.Image,
+            *,
+            original_image: Image.Image | None = None,
+        ) -> tuple[DetectionPrediction, ...]:
+            return (
+                DetectionPrediction(
+                    detector="easyocr_sam2",
+                    class_name="text",
+                    confidence=0.35,
+                    box_xyxy=(1.0, 2.0, 9.0, 5.0),
+                    mask=Image.new("L", image.size, 255),
+                    sam_score=0.8,
+                    text="sample",
+                    polygon=((1.0, 2.0), (9.0, 2.0), (9.0, 5.0), (1.0, 5.0)),
+                ),
+            )
+
+        def close(self) -> None:
+            pass
+
+    output = ProductionDetectionStage(lambda: OcrRuntime()).run(Image.new("RGB", (10, 8)))
+    artifacts = {artifact.relative_name: artifact for artifact in output.artifacts}
+    row = json.loads(artifacts["detections/detections.json"].data)["detections"][0]
+
+    assert row["text"] == "sample"
+    assert row["polygon"] == [[1.0, 2.0], [9.0, 2.0], [9.0, 5.0], [1.0, 5.0]]
 
 
 def test_essential_profile_keeps_detection_masks_without_debug_artifacts() -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 import pytest
@@ -9,6 +9,7 @@ from PIL import Image
 from watermark_worker.errors import ModelValidationError
 from watermark_worker.gpu_runtime.detection import (
     CombinedDetectionRuntime,
+    EasyOcrBoxDetector,
     GroundingDinoBoxDetector,
     RawDetection,
     YoloBoxDetector,
@@ -20,10 +21,12 @@ from watermark_worker.gpu_runtime.detection import (
 class FakeDetector:
     name: str
     detections: tuple[RawDetection, ...]
+    received_images: list[Image.Image] = field(default_factory=list)
     closed: bool = False
 
     def predict_boxes(self, image: Image.Image) -> tuple[RawDetection, ...]:
         assert image.mode == "RGB"
+        self.received_images.append(image.copy())
         return self.detections
 
     def close(self) -> None:
@@ -85,6 +88,27 @@ def test_combined_runtime_preserves_detector_identity_and_segments_once() -> Non
     assert segmenter.closed is True
 
 
+def test_combined_runtime_does_not_fuse_visual_detectors_without_ocr() -> None:
+    grounding = FakeDetector(
+        "grounding_dino_sam2",
+        (RawDetection("watermark", 0.8, (1.0, 1.0, 5.0, 5.0)),),
+    )
+    yolo = FakeDetector(
+        "yolo_sam2",
+        (RawDetection("logo", 0.7, (2.0, 2.0, 6.0, 6.0)),),
+    )
+    segmenter = FakeSegmenter((0.91, 0.92))
+    runtime = CombinedDetectionRuntime((grounding, yolo), segmenter)
+
+    predictions = runtime.predict(Image.new("RGB", (10, 10)))
+
+    assert len(predictions) == 2
+    assert segmenter.received_boxes == (
+        (1.0, 1.0, 5.0, 5.0),
+        (2.0, 2.0, 6.0, 6.0),
+    )
+
+
 def test_combined_runtime_fails_closed_on_segmenter_cardinality_mismatch() -> None:
     detector = FakeDetector(
         "yolo_sam2",
@@ -94,6 +118,72 @@ def test_combined_runtime_fails_closed_on_segmenter_cardinality_mismatch() -> No
 
     with pytest.raises(ModelValidationError, match="one mask per detection"):
         runtime.predict(Image.new("RGB", (2, 2)))
+
+
+def test_combined_runtime_keeps_overlapping_ocr_and_visual_candidates_independent() -> None:
+    ocr = FakeDetector(
+        "easyocr_sam2",
+        (
+            RawDetection(
+                "text",
+                0.35,
+                (1.0, 1.0, 5.0, 5.0),
+                text="sample",
+                polygon=((1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0)),
+            ),
+        ),
+    )
+    yolo = FakeDetector(
+        "yolo_sam2",
+        (RawDetection("logo", 0.7, (2.0, 2.0, 6.0, 6.0)),),
+    )
+    segmenter = FakeSegmenter((0.91, 0.92))
+    runtime = CombinedDetectionRuntime((ocr, yolo), segmenter)
+
+    predictions = runtime.predict(Image.new("RGB", (10, 10)))
+
+    assert len(predictions) == 2
+    assert segmenter.received_boxes == (
+        (1.0, 1.0, 5.0, 5.0),
+        (2.0, 2.0, 6.0, 6.0),
+    )
+    assert predictions[0].detector == "easyocr_sam2"
+    assert predictions[0].sources == ("easyocr",)
+    assert predictions[0].text == "sample"
+    assert predictions[1].detector == "yolo_sam2"
+    assert predictions[1].sources == ("yolo_sam2",)
+
+
+def test_combined_runtime_sends_original_image_only_to_ocr() -> None:
+    ocr = FakeDetector(
+        "easyocr_sam2",
+        (RawDetection("text", 0.35, (1.0, 1.0, 4.0, 4.0), text="sample"),),
+    )
+    yolo = FakeDetector(
+        "yolo_sam2",
+        (RawDetection("logo", 0.7, (6.0, 6.0, 9.0, 9.0)),),
+    )
+    runtime = CombinedDetectionRuntime((ocr, yolo), FakeSegmenter((0.91, 0.92)))
+    detector_image = Image.new("RGB", (10, 10), "white")
+    original_image = Image.new("RGB", (10, 10), "red")
+
+    runtime.predict(detector_image, original_image=original_image)
+
+    assert ocr.received_images[0].getpixel((0, 0)) == (255, 0, 0)
+    assert yolo.received_images[0].getpixel((0, 0)) == (255, 255, 255)
+
+
+def test_combined_runtime_rejects_mismatched_original_dimensions() -> None:
+    runtime = CombinedDetectionRuntime(
+        (FakeDetector("easyocr_sam2", ()),),
+        FakeSegmenter(()),
+    )
+
+    with pytest.raises(ModelValidationError, match="dimensions"):
+        runtime.predict(
+            Image.new("RGB", (10, 10)),
+            original_image=Image.new("RGB", (8, 8)),
+        )
 
 
 class FakeBatch(dict[str, object]):
@@ -215,3 +305,42 @@ def test_yolo_detector_passes_frozen_notebook_settings() -> None:
     assert detector.predict_boxes(Image.new("RGB", (10, 10))) == (
         RawDetection("logo", 0.75, (0.0, 1.0, 9.0, 10.0)),
     )
+
+
+class FakeNumpy:
+    @staticmethod
+    def asarray(image: Image.Image) -> Image.Image:
+        return image
+
+
+class FakeEasyOcrReader:
+    def readtext(self, image: object, **kwargs: object) -> list[object]:
+        assert isinstance(image, Image.Image)
+        assert kwargs == {"detail": 1, "paragraph": False}
+        return [
+            ([[1, 2], [9, 2], [9, 5], [1, 5]], "sample", 0.35),
+            ([[0, 0], [2, 0], [2, 1], [0, 1]], "ignore", 0.349),
+        ]
+
+
+def test_easyocr_detector_accepts_confidence_boundary_and_preserves_polygon() -> None:
+    detector = EasyOcrBoxDetector(
+        reader=FakeEasyOcrReader(),
+        numpy_module=FakeNumpy(),
+        confidence=0.35,
+        min_region_size_pixels=2,
+    )
+
+    assert detector.predict_boxes(Image.new("RGB", (10, 8))) == (
+        RawDetection(
+            "text",
+            0.35,
+            (1.0, 2.0, 9.0, 5.0),
+            text="sample",
+            polygon=((1.0, 2.0), (9.0, 2.0), (9.0, 5.0), (1.0, 5.0)),
+        ),
+    )
+
+    detector.close()
+    with pytest.raises(ModelValidationError, match="released"):
+        detector.predict_boxes(Image.new("RGB", (10, 8)))

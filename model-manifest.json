@@ -49,6 +49,13 @@
       "checksumSha256": "f600472e0bf8d8051046541230dd736bc862d5c964ff591b719abf7d80ed1835",
       "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v1/owlv2-classifier/f600472e0bf8d8051046541230dd736bc862d5c964ff591b719abf7d80ed1835/far5y1y5-8000.pt",
       "generation": "1784373320383747"
+    },
+    {
+      "artifactId": "easyocr-24ae1d245198dc3866f0ec72c77212fa64be2b1a322642fefcf6e7c3196b103d",
+      "filename": "easyocr-1.7.2-en.tar",
+      "checksumSha256": "24ae1d245198dc3866f0ec72c77212fa64be2b1a322642fefcf6e7c3196b103d",
+      "uri": "gs://project-5909a738-2fdc-451e-ad6-watermark-models/watermark-v2/easyocr/24ae1d245198dc3866f0ec72c77212fa64be2b1a322642fefcf6e7c3196b103d/easyocr-1.7.2-en.tar",
+      "generation": "1785844903071797"
     }
   ]
 }
