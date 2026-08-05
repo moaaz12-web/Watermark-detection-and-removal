@@ -11,22 +11,25 @@ worker images inside AWS from a small operator-uploaded source ZIP. BuildKit sto
 in a separate mutable ECR cache repository; reviewed release tags remain in the immutable worker
 repository.
 
-When an image digest is configured, Terraform defines four trusted Batch execution profiles:
+When an image digest is configured, Terraform defines four trusted pipeline identities with
+packaged-config compatibility profiles and external-config command profiles:
 
-- `watermark-v1`, capped by its packaged five-item configuration with a 90-minute timeout and one
-  attempt; and
-- `watermark-bulk-v1`, capped by its packaged 10,000-item configuration with a 24-hour per-attempt
+- `watermark-v1`, retaining the local-config compatibility path, capped by its five-item
+  configuration with a 90-minute timeout and one attempt; and
+- `watermark-bulk-v1`, retaining the local-config compatibility path, capped by its 10,000-item
+  configuration with a 24-hour per-attempt
   timeout and two attempts. The bulk definition retries EC2 host failures and worker exit codes
   `6` and `7`, which represent retryable storage and external-service failures. All other worker
   exits fail immediately.
 
 The OCR-enabled successors `watermark-v2` and `watermark-bulk-v2` use the same resource envelopes
-with their packaged EasyOCR configurations. They remain separately allowlisted so v1 jobs retain
-their historical detector behavior.
+but receive a generation- and SHA-pinned YAML reference from the private
+`watermark_config_bucket`/`watermark_config_prefix`. They remain separately allowlisted so v1
+jobs retain their historical detector behavior.
 
 The submission Lambda maps each exact pipeline identity to its dedicated job-definition ARN and
-packaged configuration path. A caller cannot supply an arbitrary job definition or configuration
-file.
+validates the external config prefix. A caller cannot supply an arbitrary job definition,
+configuration file, or tuning value.
 
 It intentionally creates no direct EC2 instance, GPU, NAT gateway, Elastic IP, load balancer, SSH
 key, or standalone EBS volume. The managed compute environment has `min_vcpus=0`,
@@ -59,6 +62,20 @@ or customer data in the image remain required.
    ```bash
    services/aws_submission/scripts/build_lambda.sh
    ```
+6. A private GCS config bucket/prefix supplied as `watermark_config_bucket` and
+   `watermark_config_prefix`; the same prefix must appear in `gcs_worker_read_prefixes`.
+
+Before enabling OCR jobs, publish the four immutable YAML snapshots from the repository and
+record the command's JSON output in the backend's `WATERMARK_CONFIG_REFS_JSON` mapping:
+
+```bash
+uv run python scripts/publish_pipeline_configs.py \
+  --bucket OWNER_SUPPLIED_CONFIG_BUCKET \
+  --release 2026-08-05-initial
+```
+
+The command is create-only; changing a threshold later means publishing a new release and
+changing only the server-side mapping. It does not build or push a worker image.
 
 ## Initialize and review
 

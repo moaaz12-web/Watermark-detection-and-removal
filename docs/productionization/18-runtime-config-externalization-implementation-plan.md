@@ -1,280 +1,164 @@
 # Runtime configuration externalization implementation plan
 
-Status: Proposed for implementation. This plan changes how the worker receives tunable
-watermark-removal policy; it does not change the independent OCR/YOLO/DINO detection policy.
+Status: Implementation in progress (worker/control-plane code complete; publication and deployment remain gated).
 
-## 1. Objective
+## 1. Goal
 
-Move tunable watermark-pipeline parameters out of the GPU image so threshold and mask-policy
-changes can be made by publishing a new, versioned configuration profile rather than rebuilding
-the worker image.
+Move tunable watermark-policy values out of the GPU image so OCR, detector, safety-gate, LaMa,
+and bounded image-limit tuning does not require rebuilding the image.
 
-After the one-time implementation release:
-
-- changing OCR, detector, safety-gate, inpainting, or bounded image-limit values must not require
-  a new Docker image;
-- every job must use an immutable configuration reference consisting of URI, GCS generation, and
-  SHA-256;
-- the worker must fail closed if the configuration is missing, changed, malformed, untrusted, or
-  incompatible with the selected pipeline;
-- existing v1 and v2 jobs must remain reproducible.
-
-## 2. Current state and constraints
-
-The worker currently loads a local YAML path supplied by `--config`. `Dockerfile.gpu` copies the
-pipeline YAML files into the image, and AWS Batch maps each pipeline version to one of those local
-paths. The worker hashes the loaded YAML and records `config_sha256` in its run identity and
-output markers, which gives us a useful reproducibility primitive to retain.
-
-The active OCR design is intentionally simple:
+The current detection policy remains unchanged:
 
 - EasyOCR runs on the original image;
-- OCR candidates at confidence `>= 0.35` are accepted directly;
+- OCR confidence `>= 0.35` is accepted directly;
 - OCR, YOLO, and Grounding DINO boxes remain independent;
 - there is no bbox fusion, IoU merge, or detector-agreement requirement;
-- masks are unioned only at the existing safety/inpainting stage.
+- masks are unioned only by the existing safety/inpainting path.
 
-The public API is in the separate repository:
-`/home/maaz/Desktop/infringement_project/infringement_backend`.
+After the one-time implementation release, a policy change will require publishing/promoting a
+new config object, not building a new worker image. Model, dependency, and worker-code changes
+will still require an image release.
 
-## 3. Architecture decision
+## 2. Simplified architecture
 
-Use an allowlisted, versioned GCS configuration registry. The backend chooses a profile
-server-side, the AWS submission boundary carries the exact URI/generation/checksum, and the worker
-downloads and validates the profile before execution.
-
-### 3.1 Externalize runtime policy
-
-The external profile may contain:
-
-- EasyOCR confidence, minimum region size, padding, and language selection supported by the
-  pinned OCR bundle;
-- YOLO confidence, IoU, image size, and augmentation;
-- Grounding DINO prompt, box threshold, and text threshold;
-- safety-gate thresholds and minimum product-area requirement;
-- LaMa mask dilation and mask threshold;
-- bounded image and item limits that are safe to tune operationally.
-
-The profile remains subject to strict Pydantic/YAML validation and hard upper/lower bounds in
-worker code. A profile cannot disable the safety gate, introduce a new fusion policy, or bypass
-the independent-candidate behavior.
-
-### 3.2 Keep release integrity immutable
-
-Do not make configuration the mechanism for arbitrary code or model loading. Keep these under the
-immutable worker release and model-manifest contract:
-
-- Python dependencies, worker source, and CUDA/PyTorch ABI;
-- model bundles, checksums, and the model manifest;
-- allowed model artifact IDs and SAM 2 architecture configuration files;
-- storage/IAM guardrails and approved config prefixes;
-- pipeline-version contracts and output schema.
-
-An external profile may reference only model artifacts present in the pinned model manifest and
-only safe, allowlisted model configuration paths. Adding or replacing a model remains a separate
-image/model release.
-
-### 3.3 Pin the exact profile per job
-
-Never use a mutable `latest` object. A job stores and submits:
+Use the existing private watermark GCS area with an allowlisted `watermark-configs/` prefix.
+Each job receives one immutable config reference:
 
 ```text
-profile_id       = watermark-v2-default
-config_uri       = gs://<config-bucket>/watermark/v2/<immutable-object>.yaml
-config_generation = <positive GCS generation>
-config_sha256     = <64 lowercase hex characters>
+config_uri        = gs://.../watermark-configs/watermark-v2/<release>.yaml
+config_generation = <GCS generation>
+config_sha256     = <64-character lowercase SHA-256>
 ```
 
-Retries, reconciliation, and output validation reuse the same reference. Publishing a newer
-profile affects only jobs created after the backend selects it.
+The backend chooses the reference server-side by pipeline version. Clients cannot submit a
+profile, URI, threshold, or pipeline version.
 
-## 4. Target execution flow
+The external object is the existing strict pipeline YAML, not a second configuration framework.
+The worker reuses its current Pydantic validation and config hashing. The pinned model manifest,
+model files, dependencies, worker code, and SAM 2 architecture file remain release assets.
+
+## 3. Tunable versus immutable values
+
+| Externalized policy | Kept immutable or release-controlled |
+| --- | --- |
+| EasyOCR confidence, minimum region size, padding | Worker code and dependencies |
+| YOLO confidence, IoU, image size, augmentation | Model bundles and model-manifest checksums |
+| Grounding DINO prompt and thresholds | Allowed artifact IDs and SAM 2 architecture |
+| Safety-gate thresholds | Pipeline/output contract and IAM guardrails |
+| LaMa mask dilation and threshold | Code-enforced schema bounds |
+| Safe image/item limits | Approved config bucket/prefix |
+
+External profiles must still pass all current validation. They cannot disable the safety gate,
+introduce a fusion policy, load arbitrary code, or select an artifact absent from the pinned model
+manifest.
+
+## 4. Target flow
 
 ```text
-Backend OCR toggle/profile selection
+Backend OCR toggle and pipeline-version mapping
         |
         v
-Persist pipeline version + config URI/generation/SHA on WatermarkJob
+Persist URI + generation + SHA on WatermarkJob
         |
         v
-Trusted AWS submit request carries the same immutable config reference
+AWS submit request carries the same immutable reference
         |
         v
-AWS Batch passes config reference to the worker
+AWS Batch passes the reference to the worker
         |
         v
-Worker downloads from an allowlisted GCS prefix using read-only WIF
+Worker downloads through read-only WIF, verifies, and loads the YAML
         |
         v
-Worker verifies generation, SHA-256, size, schema, bounds, and pipeline version
-        |
-        v
-Existing pipeline executes; config SHA is recorded in run/output evidence
+Existing pipeline runs and records the config SHA in output evidence
 ```
 
-## 5. Configuration registry
+The worker must fail closed on download failure, wrong generation, checksum mismatch, oversized
+or malformed YAML, unsafe URI, invalid bounds, or pipeline-version mismatch. It must never fall
+back silently to a different profile.
 
-Create a dedicated, private GCS bucket or a dedicated prefix with separate IAM policy. Prefer
-immutable object names and a deployment-owned writer. Suggested layout:
+## 5. Ordered implementation tasks
+
+### Phase 1: External config and worker support
+
+#### Task 1: Publish immutable config snapshots
+
+Publish byte-identical snapshots of the four current files:
 
 ```text
-gs://<watermark-config-bucket>/watermark-configs/
-  watermark-v1/<release-id>.yaml
-  watermark-bulk-v1/<release-id>.yaml
-  watermark-v2/<release-id>.yaml
-  watermark-bulk-v2/<release-id>.yaml
+watermark-v1.yaml
+watermark-bulk-v1.yaml
+watermark-v2.yaml
+watermark-bulk-v2.yaml
 ```
 
-The initial registry must contain byte-identical snapshots of the current v1 and v2 YAML files.
-This gives existing and historical jobs a reproducible external reference before packaged YAML
-files are removed from a future image.
-
-Registry requirements:
-
-- private bucket/prefix with worker read access only;
-- deployment/operator write access; no public access;
-- YAML content type and bounded object size;
-- checksum calculated before publication and generation captured after publication;
-- no secrets, credentials, arbitrary URLs, or unresolved placeholders;
-- a release manifest recording profile ID, pipeline version, generation, SHA, and review status.
-
-## 6. Ordered implementation tasks
-
-### Phase 1: Define and publish the profile contract
-
-#### Task 1: Split tunable policy from immutable release rules
-
-**Description:** Document and implement the boundary between externally tunable policy and
-immutable model/release identity. Reuse existing validation but ensure external input cannot alter
-pipeline version, artifact trust, storage guardrails, or the independent-detector policy.
+Store them under the private `watermark-configs/` prefix. Record each object's generation and
+SHA-256. Use a deployment/operator identity for writes and read-only worker access.
 
 **Acceptance criteria:**
 
-- [ ] A typed profile schema covers every intended tunable value.
-- [ ] Bounds reject invalid OCR confidence, negative padding, unsafe thresholds, oversized limits,
-      and unresolved placeholders.
-- [ ] The schema has no fusion/merge parameter and cannot disable the safety gate.
-- [ ] Artifact IDs and SAM 2 configuration paths are checked against the pinned release allowlist.
+- [x] A local operator command validates all four snapshots and computes SHA-256 values.
+- [ ] Objects are private, bounded in size, and immutable by publication convention.
+- [ ] Generation and SHA values are available to the backend deployment configuration after the
+      operator runs the command against the approved bucket.
 
-**Likely files:**
+**Likely files/tools:** GCS configuration, `tools/` or `scripts/`, release documentation.
 
-- `src/watermark_worker/config.py`
-- `src/watermark_worker/model_registry.py`
-- `tests/unit/test_config.py`
+**Estimated scope:** Small. The command is `scripts/publish_pipeline_configs.py`.
 
-**Dependencies:** None.
+#### Task 2: Add external config loading to the worker
 
-**Estimated scope:** Medium.
+Extend the CLI/config loader to accept a trusted external URI, generation, and expected SHA in
+addition to the existing local `--config` path. Download through the existing storage/WIF
+boundary, then pass the bytes through the same YAML parser, schema validation, and SHA calculation.
 
-#### Task 2: Create and verify initial external profile snapshots
-
-**Description:** Publish byte-identical v1/v2 small and bulk profiles to the private GCS registry.
-Record generation and SHA-256 values in a release manifest. Do not change production job
-selection yet.
+Keep the local path for development and the migration period. Do not download models or
+dependencies as part of config loading.
 
 **Acceptance criteria:**
 
-- [ ] Four initial profile snapshots exist for v1, bulk-v1, v2, and bulk-v2.
-- [ ] Their parsed values match the current packaged YAML files.
-- [ ] Each object has a recorded generation and SHA-256.
-- [ ] A no-public-access and worker-read-only IAM check passes.
-
-**Likely files/tools:**
-
-- `model-manifest.json` or a new config release manifest
-- `tools/` or an operator publishing script
-- GCS configuration bucket/prefix
-
-**Dependencies:** Task 1.
-
-**Estimated scope:** Small to medium.
-
-### Checkpoint 1: Profile contract
-
-- [ ] Worker unit tests pass for valid, malformed, out-of-bounds, and tampered profiles.
-- [ ] The four profile snapshots are byte-verified against the current YAML.
-- [ ] Security review confirms no client can choose an arbitrary profile URI.
-
-### Phase 2: Add worker external loading
-
-#### Task 3: Add generation- and checksum-pinned config loading
-
-**Description:** Extend the worker CLI/config loader to support a trusted external config
-reference in addition to the local development path. Download the object through the existing
-GCS/WIF storage boundary into a controlled temporary file or bytes buffer, then pass it through the
-same strict parser and SHA-256 calculation.
-
-**Acceptance criteria:**
-
-- [ ] Local `--config` continues to work for development and offline tests.
-- [ ] External loading requires URI, positive generation, and expected SHA-256.
-- [ ] The worker rejects wrong generation, wrong checksum, oversized content, unsafe bucket/prefix,
-      invalid YAML, invalid schema, and pipeline-version mismatch.
-- [ ] The worker does not download model weights or dependencies as a side effect of config load.
-- [ ] The config SHA in `RunIdentity`, item markers, and output manifests is the downloaded bytes'
-      SHA-256.
+- [x] Local `--config` behavior remains unchanged.
+- [x] External loading requires URI, positive generation, and SHA-256.
+- [x] The URI is restricted to the approved config bucket/prefix.
+- [x] Generation, SHA, size, YAML, schema, pipeline version, artifact binding, and safe-path
+      checks all fail closed.
+- [x] `RunIdentity`, item markers, and output manifests record the downloaded bytes' SHA.
 
 **Likely files:**
 
 - `src/watermark_worker/cli.py`
 - `src/watermark_worker/config.py`
 - `src/watermark_worker/storage.py`
-- `src/watermark_worker/contracts.py`
 - `tests/unit/test_config.py`
 - `tests/unit/test_pipeline.py`
 
-**Dependencies:** Tasks 1-2.
-
-**Estimated scope:** Large.
-
-#### Task 4: Remove policy YAMLs from the release image after compatibility support exists
-
-**Description:** Add a new worker image mode that uses external profiles for AWS jobs. Keep only
-immutable model-architecture files that runtime libraries require, or package those with the
-corresponding model artifact. Retain a local-config path for development and a temporary
-compatibility image during migration.
-
-**Acceptance criteria:**
-
-- [ ] The production image no longer relies on `/app/configs/watermark-*.yaml`.
-- [ ] SAM 2 still loads its pinned architecture configuration safely.
-- [ ] Container smoke tests execute a profile-backed validation path without network model
-      downloads.
-- [ ] The image contains no secret or mutable config material.
-
-**Likely files:**
-
-- `Dockerfile.gpu`
-- `cloudbuild.gpu.yaml`
-- `src/watermark_worker/runtime_assembly.py`
-- `tests/unit/test_gpu_cloudbuild_contract.py`
-
-**Dependencies:** Task 3.
+**Dependencies:** Task 1.
 
 **Estimated scope:** Medium.
 
-### Checkpoint 2: Worker readiness
+### Checkpoint 1: Worker readiness
 
-- [ ] Local path and external profile tests pass.
-- [ ] Tamper and replay tests prove the exact generation/SHA is enforced.
-- [ ] Container smoke test passes with the external v2 profile.
-- [ ] No model/dependency downloads occur during profile loading.
+- [ ] Local and external config tests pass.
+- [ ] Tampered, stale, malformed, and unauthorized profiles are rejected.
+- [ ] External v2 validation runs without runtime installs or model downloads.
 
-### Phase 3: Propagate the immutable profile reference through AWS
+### Phase 2: Propagate config identity through the control plane
 
-#### Task 5: Extend the AWS submission contract
+#### Task 3: Extend AWS submission and Batch parameters
 
-**Description:** Add profile identity to the trusted submit boundary. Version the request contract
-if necessary; keep the current contract available for already-created jobs during migration.
-Include profile URI, generation, and SHA in canonical request hashing and idempotency fields.
+Add `configUri`, `configGeneration`, and `configSha256` to the new trusted AWS submission
+contract. Use a new request schema version for new submissions while retaining the current parser
+for existing v1 jobs. Include all three values in canonical request hashing and idempotency.
+
+AWS Batch should pass the reference as job parameters/CLI arguments. The submission boundary must
+validate the approved GCS prefix and strict generation/SHA formats.
 
 **Acceptance criteria:**
 
-- [ ] Requests cannot omit or mutate the profile reference after reservation.
-- [ ] URI is restricted to the approved GCS bucket/prefix; generation and SHA have strict formats.
-- [ ] The canonical request hash includes all profile identity fields.
-- [ ] AWS Batch receives the exact profile reference for both small and bulk v2 jobs.
-- [ ] v1 compatibility remains available for existing jobs.
+- [x] New small and bulk v2 submissions carry the exact config reference.
+- [x] The reference cannot be omitted or changed after reservation.
+- [x] Batch receives the same URI, generation, and SHA sent by the backend.
+- [x] Existing v1 submissions remain compatible.
 
 **Likely files:**
 
@@ -282,29 +166,31 @@ Include profile URI, generation, and SHA in canonical request hashing and idempo
 - `services/aws_submission/src/aws_submission/batch_adapter.py`
 - `services/aws_submission/tests/`
 - `infra/aws/batch-job.tf`
-- `infra/aws/variables.tf`
 - `infra/aws/locals.tf`
+- `infra/aws/variables.tf`
 
-**Dependencies:** Task 3.
+**Dependencies:** Task 2.
 
-**Estimated scope:** Large.
+**Estimated scope:** Medium.
 
-#### Task 6: Add backend persistence and server-side profile selection
+#### Task 4: Persist and select config references in FastAPI
 
-**Description:** Persist the selected profile identity on `WatermarkJob`. New small and bulk jobs
-use the backend OCR toggle and a server-owned profile mapping. The client cannot submit a config
-URI, profile ID, threshold, or pipeline version.
+Add nullable config URI, generation, and SHA columns to `watermark_jobs`. New jobs populate them
+atomically from a server-owned mapping keyed by pipeline version. The existing
+`WATERMARK_OCR_ENABLED=true` default selects the v2/bulk-v2 references; `false` selects the
+v1/bulk-v1 compatibility references.
+
+Retries, reconciliation, cancellation, manifest creation, and output validation must reuse the
+persisted reference. No client request may provide configuration identity or tuning values.
 
 **Acceptance criteria:**
 
-- [ ] A migration adds nullable profile URI, generation, SHA, and optional profile ID fields for
-      compatibility, with new jobs populating them atomically.
-- [ ] Existing active jobs are backfilled to byte-identical snapshots or safely retain a local
-      compatibility path before packaged configs are removed.
-- [ ] Retries, reconciliation, cancellation, and output validation use the persisted reference.
-- [ ] `WATERMARK_OCR_ENABLED=true` selects the OCR-enabled v2 profile by default for both job
-      classes.
-- [ ] Setting it to `false` selects the v1 compatibility profile for new work.
+- [x] Migration and model fields are added with safe compatibility defaults.
+- [x] Small and bulk routes persist the selected reference before submission.
+- [x] Repeated submission/reconciliation uses the same reference.
+- [ ] Existing active jobs are backfilled to byte-identical snapshots before packaged configs are
+      removed; completed history is not rewritten.
+- [x] OCR remains enabled by default for new jobs.
 
 **Likely files:**
 
@@ -320,114 +206,118 @@ URI, profile ID, threshold, or pipeline version.
 - `tests/test_watermark_bulk_jobs_api.py`
 - `tests/test_watermark_reconciliation.py`
 
-**Dependencies:** Task 5.
+**Dependencies:** Task 3.
 
-**Estimated scope:** Large.
+**Estimated scope:** Medium to large.
 
-### Checkpoint 3: End-to-end control-plane integrity
+### Checkpoint 2: Control-plane integrity
 
-- [ ] Backend and AWS contract tests prove the same profile URI/generation/SHA survives submission.
-- [ ] Idempotent retries do not switch profiles after a new profile is published.
-- [ ] Client payloads cannot choose arbitrary profiles or thresholds.
-- [ ] Existing v1 jobs remain valid and output-compatible.
+- [ ] Backend and AWS tests prove URI/generation/SHA survives unchanged.
+- [ ] Client payloads cannot select arbitrary profiles or thresholds.
+- [ ] Retries cannot switch to a newly published profile.
+- [ ] Existing v1 jobs remain valid.
 
-### Phase 4: Staging rollout and operational tooling
+### Phase 3: Image transition and rollout
 
-#### Task 7: Add profile publication and selection tooling
+#### Task 5: Release the external-config worker image
 
-**Description:** Provide a deployment/operator command that validates a YAML profile, calculates its
-SHA, uploads it, records its generation, and emits the backend/AWS configuration values needed to
-select it. The tool must never mutate an existing profile object.
-
-**Acceptance criteria:**
-
-- [ ] Publishing requires an explicit pipeline version and profile ID.
-- [ ] The tool validates locally before upload and prints only non-sensitive metadata.
-- [ ] Existing profile objects are immutable; a new release creates a new object.
-- [ ] A profile can be promoted, rolled back, and audited without rebuilding the image.
-
-**Likely files/tools:**
-
-- `tools/` or `scripts/`
-- `docs/productionization/`
-- deployment configuration for the private GCS registry
-
-**Dependencies:** Tasks 1-2 and 6.
-
-**Estimated scope:** Medium.
-
-#### Task 8: Run one controlled staging acceptance job
-
-**Description:** Use the new external v2 profile for one small and one bulk staging job. Verify
-OCR-only removal, visual-detector removal, independent overlapping boxes, safety blocking, output
-validation, and zero-GPU cleanup.
+Build one worker image that uses external profiles for AWS jobs. Stop copying the four pipeline
+YAML files into the production image after the compatibility period. Keep only immutable runtime
+assets required by model libraries, such as the pinned SAM 2 architecture file. Retain local
+config loading for development and controlled compatibility tests.
 
 **Acceptance criteria:**
 
-- [ ] Output records the expected config SHA and generation.
-- [ ] A profile change affects only jobs created after promotion.
-- [ ] Rollback to the previous profile works without rebuilding the image.
-- [ ] No unauthorized config or model object is fetched.
-- [ ] GPU fleet returns to zero after terminal jobs.
+- [ ] Production jobs no longer depend on `/app/configs/watermark-*.yaml`.
+- [ ] Container smoke tests cover external v2 and bulk-v2 profiles.
+- [ ] Model binding and offline-startup checks still pass.
+- [ ] Existing active jobs have external references before the old image path is retired.
 
-**Dependencies:** Tasks 4-7 and explicit deployment approval.
+**Likely files:** `Dockerfile.gpu`, `cloudbuild.gpu.yaml`, runtime tests, AWS Batch definitions.
+
+**Dependencies:** Tasks 1-4.
 
 **Estimated scope:** Medium.
 
-## 7. Migration and compatibility strategy
+#### Task 6: Add simple publication, promotion, and rollback workflow
 
-1. Publish byte-identical snapshots of the four existing pipeline YAML files.
-2. Release a worker that supports both local and external config sources.
-3. Add backend/AWS profile identity fields and begin writing them for new jobs.
-4. Backfill active jobs that may be retried with the matching immutable snapshot reference.
+Provide an operator command or documented procedure that validates a YAML, uploads a new
+immutable object, records generation/SHA, and updates the backend's server-side mapping. Promotion
+and rollback change only the selected reference; they do not rebuild the worker image.
+
+Run one small and one bulk staging acceptance job covering OCR-only removal, visual-only removal,
+independent overlapping boxes, safety blocking, output validation, and zero-GPU cleanup.
+
+**Acceptance criteria:**
+
+- [ ] A new threshold profile can be promoted without an image build.
+- [ ] A previous reference can be restored without an image build.
+- [ ] Job output contains the expected config SHA and generation.
+- [ ] Only jobs created after promotion use the new profile.
+- [ ] Staging acceptance and zero-GPU checks pass.
+
+**Dependencies:** Task 5 and explicit deployment approval.
+
+**Estimated scope:** Medium.
+
+## 6. Migration order
+
+1. Publish byte-identical snapshots of all four current pipeline YAMLs.
+2. Release a worker supporting both local and external config sources.
+3. Add AWS and backend reference fields; write references for all new jobs.
+4. Backfill active jobs that may retry, preserving the matching v1/v2 snapshot.
 5. Run staging acceptance using external v2 profiles.
-6. Release the image that no longer depends on packaged pipeline YAMLs.
-7. Keep the local path only for development and controlled compatibility tests.
+6. Release the image that no longer packages tunable pipeline YAMLs.
+7. Use profile publication/promotion for future tuning.
 
-Do not rewrite completed job history. Do not change a persisted profile reference because a newer
-default has been published.
+Never mutate a persisted job reference because a newer default was published. Do not rewrite
+completed job history.
 
-## 8. Verification matrix
+## 7. Verification matrix
 
 | Layer | Required checks |
 | --- | --- |
-| Worker unit | Schema bounds, SHA mismatch, generation mismatch, URI allowlist, version mismatch, local fallback |
-| Worker integration | External v2 OCR profile, OCR confidence `0.35`, independent overlapping detections, safety gate, LaMa output |
-| Container | No runtime installs/downloads, external config startup, immutable model binding |
-| AWS contract | Strict profile fields, canonical hash, Batch parameter propagation, v1 compatibility |
-| Backend | Default OCR profile, rollback profile, persistence, retries, reconciliation, client rejection |
-| Migration | Existing active v1 jobs, terminal historical jobs, backfill idempotency |
-| Operations | IAM, profile publication, promotion, rollback, narrow logs, zero-GPU verification |
+| Worker | Schema bounds, URI allowlist, generation/SHA mismatch, version mismatch, local fallback |
+| Pipeline | OCR threshold `0.35`, independent detections, safety gate, LaMa output |
+| Container | External startup, no runtime installs/downloads, immutable model binding |
+| AWS | Strict reference fields, canonical hash, Batch propagation, v1 compatibility |
+| Backend | Default OCR selection, rollback, persistence, retry/reconciliation, client rejection |
+| Migration | Snapshot equivalence, active-job backfill, idempotency |
+| Operations | IAM, promotion, rollback, narrow logs, zero-GPU verification |
 
-## 9. Security and failure behavior
+## 8. Security and failure behavior
 
-- Config download failure, checksum mismatch, generation mismatch, malformed YAML, or policy
-  violation fails the job closed; it must not silently use a default profile.
-- The worker uses read-only identity access to the configuration prefix.
-- The backend and AWS boundary reject arbitrary client-provided config references.
-- Profile content is never treated as executable code and cannot select unpinned model artifacts.
-- Logs expose profile ID/generation/SHA and counts, not secrets or unnecessary OCR text.
-- A profile is immutable once published; rollback selects an earlier reference.
+- Config download, generation, checksum, schema, bounds, or URI failures fail closed.
+- Worker access to the config prefix is read-only; only deployment tooling writes profiles.
+- Clients never submit config URIs, profile files, thresholds, or pipeline versions.
+- Profiles cannot load arbitrary code or unpinned model artifacts.
+- Logs expose profile identity and counts, not secrets or unnecessary OCR text.
 
-## 10. Estimated scope
+## 9. Implementation status
 
-Rough estimate: **2-4 engineering days** after the design is approved, assuming the existing GCS
-WIF and AWS submission plumbing are reused:
+Completed in code:
 
-- worker loader and validation: 1 day;
-- backend/AWS persistence and contract propagation: 1-2 days;
-- publication tooling, migration, tests, and staging acceptance: 1 day.
+- Worker CLI supports local and generation/SHA-pinned external GCS YAML, with allowlist, size,
+  checksum, and schema checks.
+- AWS schema v2, canonical hashing, Lambda prefix policy, v2 Batch parameters, and v1 fallback
+  are wired.
+- FastAPI stores the three config identity fields, selects them server-side from
+  `WATERMARK_CONFIG_REFS_JSON`, and propagates them through Cloud Run orchestration.
+- Alembic revision `0053` adds the nullable compatibility columns.
+- `scripts/publish_pipeline_configs.py` validates and create-only uploads immutable snapshots.
 
-This requires one rebuilt worker image to add external-config support. After that release,
-threshold and policy tuning should be config publication/promotion only.
+Not executed in this implementation pass:
 
-## 11. Open decisions before coding
+- GCS publication, backend environment promotion, image build, staging acceptance, or AWS
+  deployment. Those require explicit operator/deployment approval and live credentials.
 
-- [ ] Use a dedicated GCS config bucket or a dedicated prefix in the existing watermark bucket;
-      dedicated bucket is preferred for least-privilege IAM.
-- [ ] Choose whether the AWS contract uses `schemaVersion=2` or additive profile fields with a
-      compatibility parser; preserve schema v1 for existing jobs either way.
-- [ ] Choose the profile promotion mechanism: backend environment setting, versioned database
-      registry row, or deployment-managed mapping. The profile URI/generation/SHA must remain
-      server-controlled.
-- [ ] Approve the one-time worker image release and staging acceptance window.
+## 10. Scope estimate
+
+Roughly **2-4 engineering days** using the existing GCS WIF and AWS plumbing:
+
+- worker loader and tests: about 1 day;
+- AWS/backend propagation and migration: 1-2 days;
+- image transition, publication procedure, and staging acceptance: about 1 day.
+
+This requires one image rebuild to add external-config support. After that, normal policy tuning
+is a config upload plus server-side promotion only.
