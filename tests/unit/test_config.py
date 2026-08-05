@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from watermark_worker.config import load_pipeline_config
+from watermark_worker.config import load_pipeline_config, load_pipeline_config_bytes
 from watermark_worker.errors import InvalidConfigurationError, ModelValidationError
 from watermark_worker.model_registry import (
     load_model_manifest,
@@ -212,6 +212,16 @@ def test_config_rejects_missing_or_mutable_values(tmp_path, sentinel: object) ->
 
     with pytest.raises(InvalidConfigurationError):
         load_pipeline_config(path)
+
+
+def test_config_bytes_loader_validates_and_hashes_external_source() -> None:
+    payload = config_payload()
+    raw = json.dumps(payload).encode("utf-8")
+
+    loaded = load_pipeline_config_bytes(raw, source="gs://config-bucket/watermark-v1.yaml")
+
+    assert loaded.config.pipeline_version == "watermark-v1"
+    assert loaded.sha256 == __import__("hashlib").sha256(raw).hexdigest()
 
 
 def test_model_manifest_requires_immutable_generation(tmp_path) -> None:

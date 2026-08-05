@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 import warnings
 from collections.abc import Callable
@@ -16,7 +17,12 @@ from pathlib import Path
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import ValidationError
 
-from watermark_worker.config import ImageLimits, load_pipeline_config
+from watermark_worker.config import (
+    ImageLimits,
+    LoadedPipelineConfig,
+    load_pipeline_config,
+    load_pipeline_config_bytes,
+)
 from watermark_worker.contracts import (
     Decision,
     ErrorCode,
@@ -35,10 +41,11 @@ from watermark_worker.contracts import (
 )
 from watermark_worker.errors import (
     InvalidCliError,
+    InvalidConfigurationError,
     InvalidManifestError,
     WorkerError,
 )
-from watermark_worker.manifest import validate_manifest
+from watermark_worker.manifest import parse_gcs_uri, validate_manifest
 from watermark_worker.model_registry import load_model_manifest, validate_model_bindings
 from watermark_worker.pipeline import PipelineExecutor, PipelineItem, PipelineOutcome
 from watermark_worker.progress import emit_event
@@ -71,7 +78,10 @@ class CliArguments:
     manifest_uri: str | None
     manifest_generation: str | None
     local_output_root: Path | None
-    config_path: Path
+    config_path: Path | None
+    config_uri: str | None
+    config_generation: str | None
+    config_sha256: str | None
     model_manifest_path: Path
     worker_image_digest: str
     validate_only: bool
@@ -142,6 +152,7 @@ class WrittenOutputItem:
 
 
 StorageFactory = Callable[[], StorageAdapter]
+_MAX_EXTERNAL_CONFIG_BYTES = 1_048_576
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -151,7 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
     manifest.add_argument("--manifest-uri")
     parser.add_argument("--manifest-generation")
     parser.add_argument("--local-output-root", type=Path)
-    parser.add_argument("--config", required=True, type=Path)
+    config = parser.add_mutually_exclusive_group(required=True)
+    config.add_argument("--config", dest="config_path", type=Path)
+    config.add_argument("--config-uri", dest="config_uri")
+    parser.add_argument("--config-generation")
+    parser.add_argument("--config-sha256")
     parser.add_argument("--model-manifest", required=True, type=Path)
     parser.add_argument("--worker-image-digest")
     parser.add_argument(
@@ -180,6 +195,20 @@ def parse_arguments(argv: list[str] | None = None) -> CliArguments:
             raise InvalidCliError("--local-output-root is required with --manifest-path")
         worker_image_digest = namespace.worker_image_digest or "local:validate-only"
 
+    if namespace.config_uri is not None:
+        if namespace.manifest_path is not None:
+            raise InvalidCliError("--config-uri requires a GCS manifest")
+        if namespace.config_generation is None:
+            raise InvalidCliError("--config-generation is required with --config-uri")
+        if not re.fullmatch(r"[1-9][0-9]*", namespace.config_generation):
+            raise InvalidCliError("--config-generation must be a positive integer")
+        if namespace.config_sha256 is None:
+            raise InvalidCliError("--config-sha256 is required with --config-uri")
+        if not re.fullmatch(r"[0-9a-f]{64}", namespace.config_sha256):
+            raise InvalidCliError("--config-sha256 must be 64 lowercase hex characters")
+    elif namespace.config_generation is not None or namespace.config_sha256 is not None:
+        raise InvalidCliError("config generation and SHA require --config-uri")
+
     try:
         validate_worker_image_digest(worker_image_digest, require_container_digest=is_gcs)
     except ValueError as exc:
@@ -189,7 +218,10 @@ def parse_arguments(argv: list[str] | None = None) -> CliArguments:
         manifest_uri=namespace.manifest_uri,
         manifest_generation=namespace.manifest_generation,
         local_output_root=namespace.local_output_root,
-        config_path=namespace.config,
+        config_path=namespace.config_path,
+        config_uri=namespace.config_uri,
+        config_generation=namespace.config_generation,
+        config_sha256=namespace.config_sha256,
         model_manifest_path=namespace.model_manifest,
         worker_image_digest=worker_image_digest,
         validate_only=namespace.validate_only,
@@ -230,13 +262,13 @@ def run(
 ) -> int:
     worker_started = time.monotonic()
     model_preparation_started = worker_started
-    loaded_config = load_pipeline_config(arguments.config_path)
-    loaded_models = load_model_manifest(arguments.model_manifest_path)
-    validate_model_bindings(loaded_config.config, loaded_models.manifest)
-    model_preparation_milliseconds = _elapsed_milliseconds(model_preparation_started)
     storage, manifest_object, manifest_identity = _load_manifest(
         arguments, storage_override=storage
     )
+    loaded_config = _load_pipeline_config(arguments, storage)
+    loaded_models = load_model_manifest(arguments.model_manifest_path)
+    validate_model_bindings(loaded_config.config, loaded_models.manifest)
+    model_preparation_milliseconds = _elapsed_milliseconds(model_preparation_started)
     try:
         manifest = InputManifest.model_validate_json(manifest_object.data)
     except ValidationError as exc:
@@ -805,6 +837,55 @@ def _default_lane_storage_factory(arguments: CliArguments) -> StorageFactory:
             raise InvalidCliError("--local-output-root is required with --manifest-path")
         return lambda: LocalStorageAdapter(output_root)
     return build_gcs_storage_adapter
+
+
+def _load_pipeline_config(
+    arguments: CliArguments,
+    storage: StorageAdapter,
+) -> LoadedPipelineConfig:
+    if arguments.config_path is not None:
+        return load_pipeline_config(arguments.config_path)
+    if (
+        arguments.config_uri is None
+        or arguments.config_generation is None
+        or arguments.config_sha256 is None
+    ):
+        raise InvalidCliError(
+            "a local config path or a pinned external config reference is required"
+        )
+
+    try:
+        location = parse_gcs_uri(arguments.config_uri, field_name="config URI")
+    except InvalidManifestError as exc:
+        raise InvalidCliError(str(exc)) from exc
+    allowed_bucket = os.environ.get("WATERMARK_CONFIG_BUCKET", "").strip()
+    allowed_prefix = os.environ.get("WATERMARK_CONFIG_PREFIX", "").strip().strip("/")
+    if not allowed_bucket or not allowed_prefix:
+        raise InvalidConfigurationError(
+            "external config loading requires WATERMARK_CONFIG_BUCKET and "
+            "WATERMARK_CONFIG_PREFIX"
+        )
+    if location.bucket != allowed_bucket or not location.object_name.startswith(
+        allowed_prefix + "/"
+    ):
+        raise InvalidCliError("config URI is outside the approved config prefix")
+
+    stored = storage.read_bytes(
+        arguments.config_uri,
+        generation=arguments.config_generation,
+    )
+    if stored.ref.generation != arguments.config_generation:
+        raise InvalidConfigurationError(
+            "external config generation did not match the pinned generation"
+        )
+    if stored.ref.size_bytes > _MAX_EXTERNAL_CONFIG_BYTES:
+        raise InvalidConfigurationError("external config exceeds the 1 MiB size limit")
+    verify_sha256(
+        stored.data,
+        arguments.config_sha256,
+        identity=arguments.config_uri,
+    )
+    return load_pipeline_config_bytes(stored.data, source=arguments.config_uri)
 
 
 def _model_work_root() -> Path:

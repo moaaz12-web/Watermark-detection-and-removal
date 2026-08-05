@@ -343,6 +343,10 @@ def load_pipeline_config(path: Path) -> LoadedPipelineConfig:
         raw = path.read_bytes()
     except OSError as exc:
         raise InvalidConfigurationError(f"cannot read pipeline configuration: {exc}") from exc
+    return load_pipeline_config_bytes(raw, source=str(path.resolve()))
+
+
+def load_pipeline_config_bytes(raw: bytes, *, source: str) -> LoadedPipelineConfig:
     try:
         payload = yaml.safe_load(raw)
     except yaml.YAMLError as exc:
@@ -357,5 +361,5 @@ def load_pipeline_config(path: Path) -> LoadedPipelineConfig:
     return LoadedPipelineConfig(
         config=config,
         sha256=hashlib.sha256(raw).hexdigest(),
-        path=path.resolve(),
+        path=Path(source),
     )

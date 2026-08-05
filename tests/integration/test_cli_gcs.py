@@ -5,6 +5,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from tests.integration.test_cli_local import write_worker_material
@@ -76,6 +77,34 @@ def gcs_arguments(
     ]
 
 
+def external_config_arguments(
+    *,
+    manifest_uri: str,
+    manifest_generation: str,
+    config_uri: str,
+    config_generation: str,
+    config_sha256: str,
+    model_manifest_path: Path,
+) -> list[str]:
+    return [
+        "--manifest-uri",
+        manifest_uri,
+        "--manifest-generation",
+        manifest_generation,
+        "--config-uri",
+        config_uri,
+        "--config-generation",
+        config_generation,
+        "--config-sha256",
+        config_sha256,
+        "--model-manifest",
+        str(model_manifest_path),
+        "--worker-image-digest",
+        WORKER_DIGEST,
+        "--validate-only",
+    ]
+
+
 def test_gcs_cli_writes_complete_job_and_reuses_it_without_writes(tmp_path: Path) -> None:
     config_path, model_manifest_path = write_worker_material(tmp_path)
     client = FakeGcsClient()
@@ -106,6 +135,76 @@ def test_gcs_cli_writes_complete_job_and_reuses_it_without_writes(tmp_path: Path
     assert entrypoint(arguments, storage=storage) == 0
 
     assert client.successful_uploads == uploads_after_first_run
+
+
+def test_gcs_cli_loads_a_pinned_external_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    client = FakeGcsClient()
+    manifest_uri, manifest_generation = seed_gcs_job(client)
+    config_uri = "gs://config-bucket/watermark-configs/watermark-v1.yaml"
+    config_data = config_path.read_bytes()
+    config_generation = client.seed_bytes(config_uri, config_data, content_type="text/yaml")
+    monkeypatch.setenv("WATERMARK_CONFIG_BUCKET", "config-bucket")
+    monkeypatch.setenv("WATERMARK_CONFIG_PREFIX", "watermark-configs/")
+    storage = GcsStorageAdapter(client=client)
+    arguments = external_config_arguments(
+        manifest_uri=manifest_uri,
+        manifest_generation=manifest_generation,
+        config_uri=config_uri,
+        config_generation=config_generation,
+        config_sha256=hashlib.sha256(config_data).hexdigest(),
+        model_manifest_path=model_manifest_path,
+    )
+
+    assert entrypoint(arguments, storage=storage) == 0
+
+
+def test_gcs_cli_rejects_an_external_config_checksum_mismatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    client = FakeGcsClient()
+    manifest_uri, manifest_generation = seed_gcs_job(client)
+    config_uri = "gs://config-bucket/watermark-configs/watermark-v1.yaml"
+    config_data = config_path.read_bytes()
+    config_generation = client.seed_bytes(config_uri, config_data, content_type="text/yaml")
+    monkeypatch.setenv("WATERMARK_CONFIG_BUCKET", "config-bucket")
+    monkeypatch.setenv("WATERMARK_CONFIG_PREFIX", "watermark-configs/")
+    arguments = external_config_arguments(
+        manifest_uri=manifest_uri,
+        manifest_generation=manifest_generation,
+        config_uri=config_uri,
+        config_generation=config_generation,
+        config_sha256="0" * 64,
+        model_manifest_path=model_manifest_path,
+    )
+
+    assert entrypoint(arguments, storage=GcsStorageAdapter(client=client)) == 2
+
+
+def test_gcs_cli_rejects_an_external_config_outside_the_allowlisted_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    client = FakeGcsClient()
+    manifest_uri, manifest_generation = seed_gcs_job(client)
+    config_uri = "gs://config-bucket/not-watermark-config.yaml"
+    config_data = config_path.read_bytes()
+    config_generation = client.seed_bytes(config_uri, config_data, content_type="text/yaml")
+    monkeypatch.setenv("WATERMARK_CONFIG_BUCKET", "config-bucket")
+    monkeypatch.setenv("WATERMARK_CONFIG_PREFIX", "watermark-configs/")
+    arguments = external_config_arguments(
+        manifest_uri=manifest_uri,
+        manifest_generation=manifest_generation,
+        config_uri=config_uri,
+        config_generation=config_generation,
+        config_sha256=hashlib.sha256(config_data).hexdigest(),
+        model_manifest_path=model_manifest_path,
+    )
+
+    assert entrypoint(arguments, storage=GcsStorageAdapter(client=client)) == 2
 
 
 def test_gcs_cli_rejects_a_new_manifest_generation_for_an_existing_job(
