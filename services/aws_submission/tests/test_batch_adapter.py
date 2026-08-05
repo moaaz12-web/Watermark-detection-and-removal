@@ -10,6 +10,7 @@ from aws_submission.batch_adapter import (
     AwsBatchAdapter,
     ProviderJobIdentityMismatch,
     ProviderJobMissing,
+    ProviderSubmissionRejected,
 )
 from aws_submission.models import ProviderStatus, SubmitRequest
 
@@ -153,6 +154,98 @@ def test_ocr_v2_submission_selects_only_its_packaged_configuration(
 
     assert client.submission is not None
     assert client.submission["parameters"]["PIPELINE_CONFIG"] == config_path
+
+
+def test_external_v2_submission_passes_only_the_pinned_config_reference() -> None:
+    client = RecordingBatchClient()
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arns={
+            "watermark-v2": (
+                "arn:aws:batch:eu-north-1:154959837939:"
+                "job-definition/watermark-staging-worker-v2:1"
+            )
+        },
+    )
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload.update(
+        {
+            "schemaVersion": 2,
+            "pipelineVersion": "watermark-v2",
+            "configUri": "gs://config-bucket/watermark-configs/watermark-v2.yaml",
+            "configGeneration": "42",
+            "configSha256": "c" * 64,
+        }
+    )
+    request = SubmitRequest.model_validate(payload)
+
+    adapter.submit(request, "watermark-wm-123", "f" * 64)
+
+    assert client.submission is not None
+    parameters = client.submission["parameters"]
+    assert parameters["PIPELINE_CONFIG_URI"] == request.config_uri
+    assert parameters["PIPELINE_CONFIG_GENERATION"] == request.config_generation
+    assert parameters["PIPELINE_CONFIG_SHA256"] == request.config_sha256
+    assert "PIPELINE_CONFIG" not in parameters
+
+
+def test_external_v1_rollback_uses_the_external_command_profile() -> None:
+    client = RecordingBatchClient()
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arns={
+            "watermark-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:job-definition/local:1"
+            ),
+            "watermark-v1-external": (
+                "arn:aws:batch:eu-north-1:154959837939:job-definition/external:1"
+            ),
+        },
+    )
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload.update(
+        {
+            "schemaVersion": 2,
+            "configUri": "gs://config-bucket/watermark-configs/watermark-v1.yaml",
+            "configGeneration": "42",
+            "configSha256": "d" * 64,
+        }
+    )
+    request = SubmitRequest.model_validate(payload)
+
+    adapter.submit(request, "watermark-wm-123", "f" * 64)
+
+    assert client.submission is not None
+    assert client.submission["jobDefinition"].endswith("/external:1")
+    assert "PIPELINE_CONFIG" not in client.submission["parameters"]
+
+
+def test_external_v1_request_fails_closed_without_an_external_definition_alias() -> None:
+    client = RecordingBatchClient()
+    adapter = AwsBatchAdapter(
+        client,
+        queue_arn="arn:aws:batch:eu-north-1:154959837939:job-queue/watermark-staging-gpu",
+        job_definition_arns={
+            "watermark-v1": (
+                "arn:aws:batch:eu-north-1:154959837939:job-definition/local:1"
+            )
+        },
+    )
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload.update(
+        {
+            "schemaVersion": 2,
+            "configUri": "gs://config-bucket/watermark-configs/watermark-v1.yaml",
+            "configGeneration": "42",
+            "configSha256": "d" * 64,
+        }
+    )
+    request = SubmitRequest.model_validate(payload)
+
+    with pytest.raises(ProviderSubmissionRejected):
+        adapter.submit(request, "watermark-wm-123", "f" * 64)
 
 
 @pytest.mark.parametrize(

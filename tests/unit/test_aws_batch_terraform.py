@@ -116,9 +116,20 @@ def test_bulk_job_definition_uses_gpu_fallback_and_has_a_bounded_24_hour_retry_e
     assert 'resource"aws_batch_job_definition""gpu_worker_bulk"' in compact
     assert 'name="${local.batch_job_name}-bulk"' in compact
     assert 'PIPELINE_CONFIG="/app/configs/watermark-bulk-v1.yaml"' in compact
-    assert 'PIPELINE_CONFIG="/app/configs/watermark-v2.yaml"' in compact
-    assert 'PIPELINE_CONFIG="/app/configs/watermark-bulk-v2.yaml"' in compact
+    assert 'PIPELINE_CONFIG_URI="UNSET"' in compact
+    assert 'PIPELINE_CONFIG_GENERATION="UNSET"' in compact
+    assert 'PIPELINE_CONFIG_SHA256="UNSET"' in compact
     assert '"--config","Ref::PIPELINE_CONFIG"' in compact
+    assert '"--config-uri","Ref::PIPELINE_CONFIG_URI"' in compact
+    assert '"--config-generation","Ref::PIPELINE_CONFIG_GENERATION"' in compact
+    assert '"--config-sha256","Ref::PIPELINE_CONFIG_SHA256"' in compact
+    assert 'resource"aws_batch_job_definition""gpu_worker_v2_external"' in compact
+    assert 'resource"aws_batch_job_definition""gpu_worker_bulk_v2_external"' in compact
+    assert 'container_properties=local.batch_worker_external_container_properties' in compact
+    assert '"watermark-v1-external"=try(aws_batch_job_definition.gpu_worker_v2_external[0].arn,"")' in compact
+    assert '"watermark-bulk-v1-external"=try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn,"")' in compact
+    assert '"watermark-v2-external"=try(aws_batch_job_definition.gpu_worker_v2_external[0].arn,"")' in compact
+    assert '"watermark-bulk-v2-external"=try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn,"")' in compact
     assert (
         "container_properties=aws_batch_job_definition.gpu_worker[0].container_properties"
         not in compact

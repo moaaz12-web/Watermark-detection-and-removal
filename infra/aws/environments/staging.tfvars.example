@@ -3,6 +3,8 @@ aws_region         = "eu-north-1"
 aws_account_id     = "154959837939"
 gcp_project_id     = "project-5909a738-2fdc-451e-ad6"
 gcp_project_number = "834057675927"
+watermark_config_bucket = "OWNER_SUPPLIED_CONFIG_BUCKET"
+watermark_config_prefix = "watermark-configs/"
 
 google_jwt_issuer      = "https://accounts.google.com"
 google_jwt_audience    = "urn:watermark:aws-gpu-submission:staging"
@@ -38,6 +40,10 @@ gcs_worker_read_prefixes = [
   {
     bucket = "OWNER_SUPPLIED_MODEL_BUCKET"
     prefix = "watermark-v2/"
+  },
+  {
+    bucket = "OWNER_SUPPLIED_CONFIG_BUCKET"
+    prefix = "watermark-configs/"
   },
 ]
 

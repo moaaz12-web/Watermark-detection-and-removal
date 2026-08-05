@@ -45,6 +45,31 @@ variable "gcp_project_number" {
   }
 }
 
+variable "watermark_config_bucket" {
+  description = "Private GCS bucket containing immutable external watermark pipeline configs."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9._-]{1,221}[a-z0-9]$", var.watermark_config_bucket))
+    error_message = "watermark_config_bucket must be a valid GCS bucket name."
+  }
+}
+
+variable "watermark_config_prefix" {
+  description = "Allowlisted GCS object prefix for immutable watermark pipeline configs."
+  type        = string
+  default     = "watermark-configs/"
+
+  validation {
+    condition = (
+      can(regex("^[A-Za-z0-9][A-Za-z0-9._/-]*$", var.watermark_config_prefix)) &&
+      !strcontains(var.watermark_config_prefix, "..") &&
+      endswith(var.watermark_config_prefix, "/")
+    )
+    error_message = "watermark_config_prefix must be a safe non-empty object prefix ending in /."
+  }
+}
+
 variable "gcp_wif_pool_id" {
   description = "Dedicated workload identity pool for AWS watermark workloads."
   type        = string

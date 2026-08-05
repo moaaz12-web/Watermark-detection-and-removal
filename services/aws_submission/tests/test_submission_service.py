@@ -14,6 +14,7 @@ from aws_submission.batch_adapter import (
 from aws_submission.canonical import (
     SubmissionPolicy,
     canonical_request_hash,
+    validate_submission,
 )
 from aws_submission.ledger import LedgerRecord, LedgerState, Reservation
 from aws_submission.models import ProviderStatus, SubmitRequest
@@ -199,6 +200,56 @@ def test_submission_policy_rejects_parent_traversal_prefix() -> None:
             output_prefixes=("gs://application-data/account_",),
             pipelines=frozenset({"watermark-v1"}),
         )
+
+
+def test_v2_submit_requests_require_a_pinned_external_config() -> None:
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload.update(
+        {
+            "schemaVersion": 2,
+            "configUri": "gs://config-bucket/watermark-configs/watermark-v2.yaml",
+            "configGeneration": "42",
+            "configSha256": "c" * 64,
+        }
+    )
+
+    parsed = SubmitRequest.model_validate(payload)
+
+    assert parsed.schema_version == 2
+    assert parsed.config_generation == "42"
+
+
+def test_submission_policy_allowlists_external_config_prefix() -> None:
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload.update(
+        {
+            "schemaVersion": 2,
+            "pipelineVersion": "watermark-v2",
+            "configUri": "gs://config-bucket/watermark-configs/watermark-v2.yaml",
+            "configGeneration": "42",
+            "configSha256": "c" * 64,
+        }
+    )
+    request = SubmitRequest.model_validate(payload)
+    request = request.model_copy(
+        update={"request_sha256": canonical_request_hash(request)}
+    )
+    policy = SubmissionPolicy(
+        manifest_prefixes=("gs://approved-job-bucket/tenant_17/",),
+        output_prefixes=("gs://approved-output-bucket/tenant_17/",),
+        config_prefixes=("gs://config-bucket/watermark-configs/",),
+        pipelines=frozenset({"watermark-v2"}),
+    )
+
+    assert validate_submission("wm_123", request, policy) == request.request_sha256
+
+
+def test_v2_submit_requests_reject_missing_external_config() -> None:
+    payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    payload["schemaVersion"] = 2
+
+    with pytest.raises(ValueError, match="config"):
+        SubmitRequest.model_validate(payload)
 
 
 def test_disabled_submission_never_reserves_or_calls_batch() -> None:

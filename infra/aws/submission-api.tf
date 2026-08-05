@@ -28,13 +28,16 @@ resource "aws_lambda_function" "submission" {
     variables = {
       APPROVED_MANIFEST_PREFIXES = jsonencode(var.approved_manifest_prefixes)
       APPROVED_OUTPUT_PREFIXES   = jsonencode(var.approved_output_prefixes)
-      BATCH_JOB_DEFINITION_ARNS  = jsonencode(local.batch_job_definition_arns)
-      BATCH_QUEUE_ARN            = aws_batch_job_queue.gpu.arn
-      EXPECTED_GOOGLE_SUB        = google_service_account.orchestrator.unique_id
-      LEDGER_TABLE_NAME          = aws_dynamodb_table.submission_ledger.name
-      LEDGER_TTL_SECONDS         = tostring(var.ledger_ttl_seconds)
-      PIPELINE_ALLOWLIST         = jsonencode(var.pipeline_allowlist)
-      SUBMISSION_ENABLED         = tostring(var.submission_enabled)
+      APPROVED_CONFIG_PREFIXES = jsonencode([
+        "gs://${var.watermark_config_bucket}/${var.watermark_config_prefix}"
+      ])
+      BATCH_JOB_DEFINITION_ARNS = jsonencode(local.batch_job_definition_arns)
+      BATCH_QUEUE_ARN           = aws_batch_job_queue.gpu.arn
+      EXPECTED_GOOGLE_SUB       = google_service_account.orchestrator.unique_id
+      LEDGER_TABLE_NAME         = aws_dynamodb_table.submission_ledger.name
+      LEDGER_TTL_SECONDS        = tostring(var.ledger_ttl_seconds)
+      PIPELINE_ALLOWLIST        = jsonencode(var.pipeline_allowlist)
+      SUBMISSION_ENABLED        = tostring(var.submission_enabled)
     }
   }
 

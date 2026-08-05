@@ -12,6 +12,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    model_validator,
 )
 
 from .errors import SubmissionErrorCode
@@ -125,7 +126,7 @@ class CancellationReason(StrEnum):
 
 
 class SubmitRequest(RequestModel):
-    schema_version: Literal[1]
+    schema_version: Literal[1, 2]
     application_job_id: ApplicationJobId
     manifest_uri: GcsUri
     manifest_generation: Generation
@@ -136,7 +137,20 @@ class SubmitRequest(RequestModel):
         "watermark-v2",
         "watermark-bulk-v2",
     ]
+    config_uri: GcsUri | None = None
+    config_generation: Generation | None = None
+    config_sha256: Sha256 | None = None
     request_sha256: Sha256
+
+    @model_validator(mode="after")
+    def validate_config_reference(self) -> SubmitRequest:
+        config_values = (self.config_uri, self.config_generation, self.config_sha256)
+        has_config = any(value is not None for value in config_values)
+        if self.schema_version == 2 and not all(value is not None for value in config_values):
+            raise ValueError("schemaVersion 2 requires a complete config reference")
+        if self.schema_version == 1 and has_config:
+            raise ValueError("schemaVersion 1 does not accept an external config reference")
+        return self
 
 
 class SubmitResponse(ResponseModel):

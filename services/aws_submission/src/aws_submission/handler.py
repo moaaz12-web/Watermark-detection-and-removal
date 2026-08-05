@@ -213,6 +213,7 @@ def _runtime() -> tuple[SubmissionService, str]:
     policy = SubmissionPolicy(
         manifest_prefixes=_json_string_tuple("APPROVED_MANIFEST_PREFIXES"),
         output_prefixes=_json_string_tuple("APPROVED_OUTPUT_PREFIXES"),
+        config_prefixes=_json_string_tuple("APPROVED_CONFIG_PREFIXES"),
         pipelines=frozenset(_json_string_tuple("PIPELINE_ALLOWLIST")),
     )
 

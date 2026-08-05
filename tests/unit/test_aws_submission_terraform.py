@@ -81,3 +81,14 @@ def test_submission_lambda_receives_exact_small_and_bulk_job_definitions() -> No
         '"watermark-bulk-v2"=try(aws_batch_job_definition.gpu_worker_bulk_v2[0].arn,"")'
         in compact
     )
+
+
+def test_submission_and_worker_share_an_allowlisted_external_config_prefix() -> None:
+    text = terraform_text()
+    compact = compact_terraform_text()
+
+    assert "watermark_config_bucket" in text
+    assert "watermark_config_prefix" in text
+    assert "APPROVED_CONFIG_PREFIXES" in text
+    assert 'name="WATERMARK_CONFIG_BUCKET"' in compact
+    assert 'name="WATERMARK_CONFIG_PREFIX"' in compact

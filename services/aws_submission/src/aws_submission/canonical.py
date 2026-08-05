@@ -18,6 +18,9 @@ IMMUTABLE_REQUEST_FIELDS = (
     "manifestGeneration",
     "outputManifestUri",
     "pipelineVersion",
+    "configUri",
+    "configGeneration",
+    "configSha256",
 )
 
 
@@ -26,11 +29,12 @@ class SubmissionPolicy:
     manifest_prefixes: tuple[str, ...]
     output_prefixes: tuple[str, ...]
     pipelines: frozenset[str]
+    config_prefixes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.manifest_prefixes or not self.output_prefixes or not self.pipelines:
             raise ValueError("submission policy allowlists must not be empty")
-        prefixes = (*self.manifest_prefixes, *self.output_prefixes)
+        prefixes = (*self.manifest_prefixes, *self.output_prefixes, *self.config_prefixes)
         if any(
             GCS_POLICY_PREFIX_PATTERN.fullmatch(prefix) is None or ".." in prefix
             for prefix in prefixes
@@ -40,7 +44,11 @@ class SubmissionPolicy:
 
 def canonical_request_bytes(request: SubmitRequest) -> bytes:
     dumped = request.model_dump(mode="json", by_alias=True)
-    immutable = {field: dumped[field] for field in IMMUTABLE_REQUEST_FIELDS}
+    immutable = {
+        field: dumped[field]
+        for field in IMMUTABLE_REQUEST_FIELDS
+        if dumped.get(field) is not None
+    }
     return json.dumps(
         immutable,
         sort_keys=True,
@@ -67,6 +75,10 @@ def validate_submission(
         raise ValueError("outputManifestUri is outside the approved prefixes")
     if request.pipeline_version not in policy.pipelines:
         raise ValueError("pipelineVersion is not approved")
+    if request.config_uri is not None and not any(
+        request.config_uri.startswith(prefix) for prefix in policy.config_prefixes
+    ):
+        raise ValueError("configUri is outside the approved prefixes")
 
     calculated_hash = canonical_request_hash(request)
     if request.request_sha256 != calculated_hash:

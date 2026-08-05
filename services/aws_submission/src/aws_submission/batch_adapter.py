@@ -60,24 +60,50 @@ class AwsBatchAdapter:
         deterministic_job_name: str,
         request_sha256: str,
     ) -> ProviderJob:
-        job_definition_arn = self._job_definition_arns.get(request.pipeline_version)
-        pipeline_config = _PIPELINE_CONFIGS.get(request.pipeline_version)
-        if not self._queue_arn or not job_definition_arn or not pipeline_config:
+        definition_key = (
+            f"{request.pipeline_version}-external"
+            if request.config_uri is not None
+            else request.pipeline_version
+        )
+        job_definition_arn = self._job_definition_arns.get(definition_key)
+        if (
+            job_definition_arn is None
+            and request.config_uri is not None
+            and request.pipeline_version in {"watermark-v2", "watermark-bulk-v2"}
+        ):
+            # Older deployments already used the v2 definitions for external
+            # configs. Never fall back to a packaged v1 definition, because it
+            # would silently ignore the pinned reference.
+            job_definition_arn = self._job_definition_arns.get(request.pipeline_version)
+        if not self._queue_arn or not job_definition_arn:
             raise ProviderSubmissionRejected
+        parameters = {
+            "JOB_ID": request.application_job_id,
+            "MANIFEST_URI": request.manifest_uri,
+            "MANIFEST_GENERATION": request.manifest_generation,
+            "OUTPUT_MANIFEST_URI": request.output_manifest_uri,
+            "PIPELINE_VERSION": request.pipeline_version,
+            "PROVIDER_ATTEMPT": "1",
+        }
+        if request.config_uri is not None:
+            parameters.update(
+                {
+                    "PIPELINE_CONFIG_URI": request.config_uri,
+                    "PIPELINE_CONFIG_GENERATION": request.config_generation or "",
+                    "PIPELINE_CONFIG_SHA256": request.config_sha256 or "",
+                }
+            )
+        else:
+            pipeline_config = _PIPELINE_CONFIGS.get(request.pipeline_version)
+            if pipeline_config is None:
+                raise ProviderSubmissionRejected
+            parameters["PIPELINE_CONFIG"] = pipeline_config
         try:
             response = self._client.submit_job(
                 jobName=deterministic_job_name,
                 jobQueue=self._queue_arn,
                 jobDefinition=job_definition_arn,
-                parameters={
-                    "JOB_ID": request.application_job_id,
-                    "MANIFEST_URI": request.manifest_uri,
-                    "MANIFEST_GENERATION": request.manifest_generation,
-                    "OUTPUT_MANIFEST_URI": request.output_manifest_uri,
-                    "PIPELINE_VERSION": request.pipeline_version,
-                    "PIPELINE_CONFIG": pipeline_config,
-                    "PROVIDER_ATTEMPT": "1",
-                },
+                parameters=parameters,
                 tags={
                     "applicationJobId": request.application_job_id,
                     "requestSha256": request_sha256,

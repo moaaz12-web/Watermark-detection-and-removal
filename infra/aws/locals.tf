@@ -52,6 +52,12 @@ locals {
     "watermark-bulk-v1" = try(aws_batch_job_definition.gpu_worker_bulk[0].arn, "")
     "watermark-v2"      = try(aws_batch_job_definition.gpu_worker_v2[0].arn, "")
     "watermark-bulk-v2" = try(aws_batch_job_definition.gpu_worker_bulk_v2[0].arn, "")
+    # External requests use dedicated command profiles; schema-v1 requests
+    # continue to use the packaged-config definitions above.
+    "watermark-v1-external"      = try(aws_batch_job_definition.gpu_worker_v2_external[0].arn, "")
+    "watermark-bulk-v1-external" = try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn, "")
+    "watermark-v2-external"      = try(aws_batch_job_definition.gpu_worker_v2_external[0].arn, "")
+    "watermark-bulk-v2-external" = try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn, "")
   }
 
   common_tags = {
