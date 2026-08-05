@@ -303,7 +303,7 @@ Completed in code:
   are wired.
 - FastAPI stores the three config identity fields, selects them server-side from
   `WATERMARK_CONFIG_REFS_JSON`, and propagates them through Cloud Run orchestration.
-- Alembic revision `0053` adds the nullable compatibility columns.
+- Alembic revision `0052` adds the nullable compatibility columns.
 - `scripts/publish_pipeline_configs.py` validates and create-only uploads immutable snapshots.
 
 Not executed in this implementation pass:
