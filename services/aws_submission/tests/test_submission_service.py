@@ -398,6 +398,19 @@ def test_repeated_active_cancellation_calls_terminate_once() -> None:
     assert batch.terminate_calls == 1
 
 
+def test_application_timeout_cancellation_reason_is_preserved() -> None:
+    ledger = FakeLedger()
+    batch = FakeBatch()
+    submission = service(ledger, batch)
+    submission.submit("wm_123", request())
+
+    status = submission.cancel("wm_123", "APPLICATION_TIMEOUT")
+
+    assert status.status is ProviderStatus.CANCELLATION_REQUESTED
+    assert status.reason_code == "APPLICATION_TIMEOUT"
+    assert ledger.records["wm_123"].reason_code == "APPLICATION_TIMEOUT"
+
+
 def test_status_maps_failed_cancelled_job_to_cancelled() -> None:
     ledger = FakeLedger()
     batch = FakeBatch()
