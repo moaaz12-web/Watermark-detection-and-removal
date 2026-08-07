@@ -476,6 +476,7 @@ def run(
                     assert prepared.inference is not None
                     context = prepared.inference
                     handed_off_final_image = False
+                    outcome: PipelineOutcome | None = None
                     try:
                         if active_executor is None:
                             executor_started = time.monotonic()

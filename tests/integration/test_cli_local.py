@@ -192,6 +192,41 @@ def test_entrypoint_logs_unexpected_exception_details(
     assert "RuntimeError: model initialization exploded" in event["stackTrace"]
 
 
+def test_executor_initialization_failure_is_not_masked_by_cleanup(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, model_manifest_path = write_worker_material(tmp_path)
+    manifest_path = write_local_manifest(tmp_path, item_count=1)
+
+    class InitializingExecutor:
+        def initialize(self) -> None:
+            raise OSError("EasyOCR initialization failed")
+
+        def process_one(self, item: object) -> object:
+            raise AssertionError(f"process_one should not run: {item}")
+
+        def close(self) -> None:
+            pass
+
+    exit_code = entrypoint(
+        inference_arguments(
+            manifest_path=manifest_path,
+            output_root=tmp_path / "output",
+            config_path=config_path,
+            model_manifest_path=model_manifest_path,
+        ),
+        executor=InitializingExecutor(),  # type: ignore[arg-type]
+    )
+
+    event = [json.loads(line) for line in capsys.readouterr().out.splitlines()][-1]
+    assert exit_code == 10
+    assert event["errorCode"] == "UNEXPECTED_FATAL"
+    assert event["errorType"] == "OSError"
+    assert event["errorMessage"] == "EasyOCR initialization failed"
+    assert "OSError: EasyOCR initialization failed" in event["stackTrace"]
+    assert "UnboundLocalError" not in event["stackTrace"]
+
+
 def test_local_validate_only_writes_terminal_results_without_final_uri(tmp_path: Path) -> None:
     config_path, model_manifest_path = write_worker_material(tmp_path)
     inputs = tmp_path / "inputs"

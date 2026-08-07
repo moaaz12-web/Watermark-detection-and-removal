@@ -579,6 +579,9 @@ def load_local_detection_runtime(
                     list(config.easyocr.languages),
                     gpu=device,
                     model_storage_directory=str(artifacts.easyocr.runtime_path),
+                    user_network_directory=str(
+                        artifacts.easyocr.runtime_path.parent / "easyocr-user-network"
+                    ),
                     download_enabled=False,
                 ),
                 numpy_module=numpy_module,
