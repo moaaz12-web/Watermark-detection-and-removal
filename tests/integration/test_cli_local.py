@@ -161,6 +161,37 @@ def inference_arguments(
     ]
 
 
+def test_entrypoint_logs_unexpected_exception_details(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def fail(*args: object, **kwargs: object) -> int:
+        raise RuntimeError("model initialization exploded")
+
+    monkeypatch.setattr(cli_module, "run", fail)
+
+    exit_code = entrypoint(
+        [
+            "--manifest-path",
+            "manifest.json",
+            "--local-output-root",
+            "output",
+            "--config",
+            "config.yaml",
+            "--model-manifest",
+            "model-manifest.json",
+        ]
+    )
+
+    assert exit_code == 10
+    event = json.loads(capsys.readouterr().out)
+    assert event["eventType"] == "worker_failed"
+    assert event["errorCode"] == "UNEXPECTED_FATAL"
+    assert event["errorType"] == "RuntimeError"
+    assert event["errorMessage"] == "model initialization exploded"
+    assert "RuntimeError: model initialization exploded" in event["stackTrace"]
+
+
 def test_local_validate_only_writes_terminal_results_without_final_uri(tmp_path: Path) -> None:
     config_path, model_manifest_path = write_worker_material(tmp_path)
     inputs = tmp_path / "inputs"

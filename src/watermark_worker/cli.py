@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+import traceback
 import warnings
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -248,8 +249,14 @@ def entrypoint(
     except WorkerError as exc:
         emit_event("worker_failed", errorCode=exc.error_code)
         return int(exit_code_for_error(exc.error_code))
-    except Exception:
-        emit_event("worker_failed", errorCode="UNEXPECTED_FATAL")
+    except Exception as exc:
+        emit_event(
+            "worker_failed",
+            errorCode="UNEXPECTED_FATAL",
+            errorType=type(exc).__name__,
+            errorMessage=str(exc),
+            stackTrace="".join(traceback.format_exception(exc)),
+        )
         return 10
 
 
