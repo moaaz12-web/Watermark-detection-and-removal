@@ -148,7 +148,7 @@ blue-green transition:
 4. run a controlled application-level acceptance; and
 5. retire the legacy environment only in a later, separately reviewed change.
 
-The current fallback environment is `watermark-staging-gpu-fallback`. It uses
+The current fallback environment is `watermark-staging-gpu-fallback-v2`. It uses
 `BEST_FIT_PROGRESSIVE_ORDERED` with `g4dn.xlarge`, then `g5.xlarge`, then `g6.xlarge`; the legacy
 `watermark-staging-gpu` environment remains the rollback resource.
 
@@ -158,7 +158,7 @@ Run these commands after a successful apply:
 
 ```bash
 rtk proxy aws batch describe-compute-environments \
-  --compute-environments watermark-staging-gpu watermark-staging-gpu-fallback \
+  --compute-environments watermark-staging-gpu watermark-staging-gpu-fallback-v2 \
   --region "$AWS_REGION" \
   --query 'computeEnvironments[].{name:computeEnvironmentName,state:state,status:status,allocation:computeResources.allocationStrategy,types:computeResources.instanceTypes,min:computeResources.minvCpus,desired:computeResources.desiredvCpus,max:computeResources.maxvCpus}' \
   --output table
