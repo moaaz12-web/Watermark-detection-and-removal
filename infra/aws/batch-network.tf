@@ -14,7 +14,7 @@ resource "aws_vpc" "batch" {
 }
 
 resource "aws_subnet" "batch_public" {
-  count = 2
+  count = 3
 
   vpc_id                  = aws_vpc.batch.id
   availability_zone       = data.aws_availability_zones.available.names[count.index]
@@ -52,7 +52,7 @@ resource "aws_route" "batch_public_ipv4" {
 }
 
 resource "aws_route_table_association" "batch_public" {
-  count = 2
+  count = 3
 
   route_table_id = aws_route_table.batch_public.id
   subnet_id      = aws_subnet.batch_public[count.index].id
