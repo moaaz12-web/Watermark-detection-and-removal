@@ -184,60 +184,70 @@ class PipelineExecutor:
                     error=exc,
                     timing=timing.snapshot(),
                 )
-        finally:
-            background.detector_image.close()
 
-        with timing.measure("safetyGateMilliseconds"):
-            evaluation = evaluate_safety_gate(
-                detection_masks=list(detection.detection_masks),
-                foreground_mask=background.foreground_mask,
-                config=self.safety_gate,
-            )
-        artifacts = [*background.artifacts, *detection.artifacts]
-        if evaluation.approved_mask is not None:
-            artifacts.append(
-                StageArtifact(
-                    relative_name="masks/combined_mask.png",
-                    data=evaluation.approved_mask.to_png_bytes(),
-                    content_type="image/png",
+            with timing.measure("safetyGateMilliseconds"):
+                evaluation = evaluate_safety_gate(
+                    detection_masks=list(detection.detection_masks),
+                    foreground_mask=background.foreground_mask,
+                    config=self.safety_gate,
                 )
+            artifacts = [*background.artifacts, *detection.artifacts]
+            if evaluation.approved_mask is not None:
+                artifacts.append(
+                    StageArtifact(
+                        relative_name="masks/combined_mask.png",
+                        data=evaluation.approved_mask.to_png_bytes(),
+                        content_type="image/png",
+                    )
+                )
+            blocked_final_image = (
+                background.detector_image.copy()
+                if evaluation.decision
+                in {SafetyDecision.BLOCKED, SafetyDecision.UNVERIFIED}
+                else None
             )
-        gated = _outcome_for_gate(
-            item_id=item.item_id,
-            detection_count=len(detection.detection_masks),
-            evaluation=evaluation,
-            artifacts=tuple(artifacts),
-            timing=timing.snapshot(),
-        )
-        if (
-            evaluation.decision is not SafetyDecision.ALLOWED
-            or evaluation.approved_mask is None
-        ):
-            return gated
+            gated = _outcome_for_gate(
+                item_id=item.item_id,
+                detection_count=len(detection.detection_masks),
+                evaluation=evaluation,
+                artifacts=tuple(artifacts),
+                timing=timing.snapshot(),
+                final_image=blocked_final_image,
+            )
+            if (
+                evaluation.decision is not SafetyDecision.ALLOWED
+                or evaluation.approved_mask is None
+            ):
+                return gated
 
-        try:
-            # The original source is intentionally the only inpainting input.
-            with timing.measure("inpaintingMilliseconds"):
-                inpainted = self.inpainting.run(item.source_image, evaluation.approved_mask)
-        except Exception as exc:
-            return _failed_outcome(
-                item=item,
-                error_code=ErrorCode.INPAINTING_FAILED,
-                error=exc,
+            try:
+                # The white RMBG composite is the production inpainting input.
+                with timing.measure("inpaintingMilliseconds"):
+                    inpainted = self.inpainting.run(
+                        background.detector_image,
+                        evaluation.approved_mask,
+                    )
+            except Exception as exc:
+                return _failed_outcome(
+                    item=item,
+                    error_code=ErrorCode.INPAINTING_FAILED,
+                    error=exc,
+                    timing=timing.snapshot(),
+                )
+            return PipelineOutcome(
+                item_id=gated.item_id,
+                status=ItemStatus.SUCCEEDED,
+                decision=Decision.INPAINTED,
+                detection_count=gated.detection_count,
+                warning_codes=gated.warning_codes,
+                artifacts=(*gated.artifacts, *inpainted.artifacts),
+                final_image=inpainted.final_image,
+                combined_mask=evaluation.approved_mask,
+                safety_gate=gated.safety_gate,
                 timing=timing.snapshot(),
             )
-        return PipelineOutcome(
-            item_id=gated.item_id,
-            status=ItemStatus.SUCCEEDED,
-            decision=Decision.INPAINTED,
-            detection_count=gated.detection_count,
-            warning_codes=gated.warning_codes,
-            artifacts=(*gated.artifacts, *inpainted.artifacts),
-            final_image=inpainted.final_image,
-            combined_mask=evaluation.approved_mask,
-            safety_gate=gated.safety_gate,
-            timing=timing.snapshot(),
-        )
+        finally:
+            background.detector_image.close()
 
     def close(self) -> None:
         if self._closed:
@@ -293,6 +303,7 @@ def _outcome_for_gate(
     evaluation: SafetyGateEvaluation,
     artifacts: tuple[StageArtifact, ...],
     timing: PipelineTiming,
+    final_image: Image.Image | None = None,
 ) -> PipelineOutcome:
     if evaluation.decision is SafetyDecision.ALLOWED:
         return PipelineOutcome(
@@ -328,6 +339,7 @@ def _outcome_for_gate(
         detection_count=detection_count,
         warning_codes=evaluation.warning_codes,
         artifacts=artifacts,
+        final_image=final_image,
         safety_gate=evaluation,
         timing=timing,
     )

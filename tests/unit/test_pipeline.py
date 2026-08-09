@@ -29,9 +29,9 @@ def gate_config() -> SafetyGateConfig:
     return SafetyGateConfig(
         enabled=True,
         failure_policy="block_unverified",
-        per_detection_block=0.4,
+        per_detection_block=0.5,
         combined_warn=0.25,
-        combined_block=0.55,
+        combined_block=0.9,
         min_product_area_pixels=3,
     )
 
@@ -40,12 +40,15 @@ class BackgroundStage:
     def __init__(self, foreground_mask: BinaryMask | None) -> None:
         self.foreground_mask = foreground_mask
         self.calls: list[Image.Image] = []
+        self.detector_images: list[Image.Image] = []
         self.closed = 0
 
     def run(self, source: Image.Image) -> BackgroundRemovalOutput:
         self.calls.append(source)
+        detector_image = Image.new("RGB", source.size, "white")
+        self.detector_images.append(detector_image)
         return BackgroundRemovalOutput(
-            detector_image=Image.new("RGB", source.size, "white"),
+            detector_image=detector_image,
             foreground_mask=self.foreground_mask,
             artifacts=(),
         )
@@ -324,7 +327,7 @@ def test_executor_keeps_all_models_resident_across_10000_sequential_items() -> N
     assert background.closed == detection.closed == inpainting.closed == 1
 
 
-def test_executor_uses_original_source_for_inpainting_and_releases_stages() -> None:
+def test_executor_uses_white_detector_image_for_inpainting_and_releases_stages() -> None:
     source = source_image()
     background = BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1)))
     detector = DetectorStage((mask((1, 0)), mask((1, 1), (3, 3))))
@@ -341,7 +344,8 @@ def test_executor_uses_original_source_for_inpainting_and_releases_stages() -> N
     assert outcome.status is ItemStatus.SUCCEEDED
     assert outcome.decision is Decision.INPAINTED
     assert outcome.final_image is not None
-    assert inpainting.calls[0][0] is source
+    assert inpainting.calls[0][0] is background.detector_images[0]
+    assert inpainting.calls[0][0] is not source
     assert detector.calls[0] is not source
     assert background.closed == detector.closed == inpainting.closed == 1
 
@@ -418,7 +422,27 @@ def test_unverified_gate_blocks_without_calling_inpainting() -> None:
 
     assert outcome.status is ItemStatus.BLOCKED_BY_SAFETY_GATE
     assert outcome.decision is Decision.UNVERIFIED
-    assert outcome.final_image is None
+    assert outcome.final_image is not None
+    assert outcome.final_image.getpixel((0, 0)) == (255, 255, 255)
+    assert inpainting.calls == []
+
+
+def test_safety_block_returns_white_detector_image_without_inpainting() -> None:
+    source = source_image()
+    inpainting = InpaintingStage()
+    executor = PipelineExecutor(
+        background_removal=BackgroundStage(mask((0, 0), (0, 1), (1, 0), (1, 1))),
+        detection=DetectorStage((mask((0, 0), (0, 1), (1, 0)),)),
+        inpainting=inpainting,
+        safety_gate=gate_config(),
+    )
+
+    outcome = executor.process([PipelineItem(item_id="asset_123", source_image=source)])[0]
+
+    assert outcome.status is ItemStatus.BLOCKED_BY_SAFETY_GATE
+    assert outcome.decision is Decision.BLOCKED
+    assert outcome.final_image is not None
+    assert outcome.final_image.getpixel((0, 0)) == (255, 255, 255)
     assert inpainting.calls == []
 
 

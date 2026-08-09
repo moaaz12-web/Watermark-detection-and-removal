@@ -126,10 +126,22 @@ def test_bulk_job_definition_uses_gpu_fallback_and_has_a_bounded_24_hour_retry_e
     assert 'resource"aws_batch_job_definition""gpu_worker_v2_external"' in compact
     assert 'resource"aws_batch_job_definition""gpu_worker_bulk_v2_external"' in compact
     assert 'container_properties=local.batch_worker_external_container_properties' in compact
-    assert '"watermark-v1-external"=try(aws_batch_job_definition.gpu_worker_v2_external[0].arn,"")' in compact
-    assert '"watermark-bulk-v1-external"=try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn,"")' in compact
-    assert '"watermark-v2-external"=try(aws_batch_job_definition.gpu_worker_v2_external[0].arn,"")' in compact
-    assert '"watermark-bulk-v2-external"=try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn,"")' in compact
+    assert (
+        '"watermark-v1-external"=try(aws_batch_job_definition.gpu_worker_v2_external[0].arn,"")'
+        in compact
+    )
+    assert (
+        '"watermark-bulk-v1-external"=try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn,"")'
+        in compact
+    )
+    assert (
+        '"watermark-v2-external"=try(aws_batch_job_definition.gpu_worker_v2_external[0].arn,"")'
+        in compact
+    )
+    assert (
+        '"watermark-bulk-v2-external"=try(aws_batch_job_definition.gpu_worker_bulk_v2_external[0].arn,"")'
+        in compact
+    )
     assert (
         "container_properties=aws_batch_job_definition.gpu_worker[0].container_properties"
         not in compact

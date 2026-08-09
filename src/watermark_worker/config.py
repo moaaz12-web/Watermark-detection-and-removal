@@ -53,7 +53,7 @@ class StrictConfigModel(BaseModel):
 class BackgroundRemovalConfig(StrictConfigModel):
     enabled: Literal[True]
     detector_input: Literal["white_background"]
-    final_image_input: Literal["source_original"]
+    final_image_input: Literal["white_background"]
     model_artifact_id: ModelArtifactId
     model_input_size: tuple[int, int]
 
@@ -158,7 +158,7 @@ class SafetyGateConfig(StrictConfigModel):
 
 class InpaintingConfig(StrictConfigModel):
     model_artifact_id: ModelArtifactId
-    input: Literal["source_original"]
+    input: Literal["white_background"]
     mask_dilation_pixels: int = Field(ge=0)
     mask_threshold: int = Field(ge=0, le=255)
 

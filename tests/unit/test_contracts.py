@@ -115,8 +115,6 @@ def test_manifest_rejects_mixed_local_and_gcs_items() -> None:
 @pytest.mark.parametrize(
     ("status", "decision"),
     [
-        (ItemStatus.BLOCKED_BY_SAFETY_GATE, Decision.UNVERIFIED),
-        (ItemStatus.BLOCKED_BY_SAFETY_GATE, Decision.BLOCKED),
         (ItemStatus.SKIPPED_NO_WATERMARK, Decision.NO_WATERMARK),
     ],
 )
@@ -128,6 +126,16 @@ def test_non_inpainted_terminal_results_forbid_final_uri(
 
     with pytest.raises(ValidationError, match="finalUri"):
         ItemResult.model_validate(payload)
+
+
+@pytest.mark.parametrize("decision", [Decision.UNVERIFIED, Decision.BLOCKED])
+def test_safety_block_accepts_a_background_removed_final_uri(decision: Decision) -> None:
+    payload = result_payload(ItemStatus.BLOCKED_BY_SAFETY_GATE, decision)
+    payload["finalUri"] = "file:///output/background_removed/final.png"
+
+    result = ItemResult.model_validate(payload)
+
+    assert result.final_uri == "file:///output/background_removed/final.png"
 
 
 def test_inpainted_success_requires_final_uri() -> None:
@@ -144,6 +152,12 @@ def test_failed_result_requires_error_code_and_never_final_uri() -> None:
         ItemResult.model_validate(payload)
 
     payload["errorCode"] = ErrorCode.CORRUPT_IMAGE
+    payload["finalUri"] = "file:///output/final.png"
+
+    with pytest.raises(ValidationError, match="finalUri"):
+        ItemResult.model_validate(payload)
+
+    payload.pop("finalUri")
     result = ItemResult.model_validate(payload)
     assert result.final_uri is None
 

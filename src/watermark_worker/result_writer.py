@@ -16,6 +16,7 @@ from watermark_worker.contracts import (
     ObjectRef,
     OutputManifest,
     OutputManifestEntry,
+    final_artifact_relative_name,
 )
 from watermark_worker.errors import (
     ConditionalWriteCollision,
@@ -196,9 +197,12 @@ class ResultWriter:
                 },
                 identity=f"artifact {name}",
             )
-        self._validate_result_artifact_link(
-            result.final_uri, "inpainted/final.png", marker.artifacts
-        )
+        if result.final_uri is not None:
+            self._validate_result_artifact_link(
+                result.final_uri,
+                final_artifact_relative_name(result.status),
+                marker.artifacts,
+            )
         self._validate_result_artifact_link(
             result.combined_mask_uri, "masks/combined_mask.png", marker.artifacts
         )

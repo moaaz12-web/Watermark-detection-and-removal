@@ -15,9 +15,9 @@ def gate_config() -> SafetyGateConfig:
     return SafetyGateConfig(
         enabled=True,
         failure_policy="block_unverified",
-        per_detection_block=0.4,
+        per_detection_block=0.5,
         combined_warn=0.25,
-        combined_block=0.55,
+        combined_block=0.9,
         min_product_area_pixels=3,
     )
 
@@ -92,7 +92,7 @@ def test_no_detection_masks_skips_without_inpainting() -> None:
 
 def test_all_high_overlap_detections_are_blocked() -> None:
     evaluation = evaluate_safety_gate(
-        detection_masks=[mask((0, 0), (0, 1))],
+        detection_masks=[mask((0, 0), (0, 1), (1, 0))],
         foreground_mask=mask((0, 0), (0, 1), (1, 0), (1, 1)),
         config=gate_config(),
     )
@@ -105,7 +105,11 @@ def test_all_high_overlap_detections_are_blocked() -> None:
 def test_gate_drops_suspicious_mask_then_allows_safe_union_with_warning() -> None:
     foreground = mask((0, 0), (0, 1), (1, 0), (1, 1))
     evaluation = evaluate_safety_gate(
-        detection_masks=[mask((0, 0), (0, 1)), mask((1, 0)), mask((1, 1), (3, 3))],
+        detection_masks=[
+            mask((0, 0), (0, 1), (1, 0)),
+            mask((1, 0)),
+            mask((1, 1), (3, 3)),
+        ],
         foreground_mask=foreground,
         config=gate_config(),
     )
@@ -114,3 +118,19 @@ def test_gate_drops_suspicious_mask_then_allows_safe_union_with_warning() -> Non
     assert evaluation.approved_mask == mask((1, 0), (1, 1), (3, 3))
     assert evaluation.warning_codes == ["HIGH_PRODUCT_OVERLAP"]
     assert evaluation.dropped_detection_count == 1
+
+
+def test_combined_overlap_above_ninety_percent_is_blocked() -> None:
+    foreground = mask((0, 0), (0, 1), (1, 0), (1, 1))
+    evaluation = evaluate_safety_gate(
+        detection_masks=[
+            mask((0, 0), (0, 1)),
+            mask((1, 0), (1, 1)),
+        ],
+        foreground_mask=foreground,
+        config=gate_config(),
+    )
+
+    assert evaluation.decision is SafetyDecision.BLOCKED
+    assert evaluation.approved_mask is None
+    assert evaluation.dropped_detection_count == 0

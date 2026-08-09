@@ -38,6 +38,7 @@ from watermark_worker.contracts import (
     OutputManifestEntry,
     StorageMode,
     exit_code_for_error,
+    final_artifact_relative_name,
     validate_worker_image_digest,
 )
 from watermark_worker.errors import (
@@ -328,7 +329,8 @@ def run(
         if reused:
             reused_items += 1
         else:
-            item_pipeline_milliseconds += timing.item_wall_milliseconds
+            if timing.item_wall_milliseconds is not None:
+                item_pipeline_milliseconds += timing.item_wall_milliseconds
         entries[result.item_id] = entry
         emit_event(
             "item_completed",
@@ -799,7 +801,7 @@ class _OutputLane:
         try:
             if pending.final_image is not None:
                 final_artifact = ArtifactPayload(
-                    relative_name="inpainted/final.png",
+                    relative_name=final_artifact_relative_name(pending.result.status),
                     data=_png_bytes(pending.final_image),
                     content_type="image/png",
                 )
@@ -1112,7 +1114,10 @@ def _inference_result(
     if len(names) != len(set(names)):
         raise RuntimeError(f"item {outcome.item_id} produced duplicate artifact names")
     final_uri = (
-        writer.artifact_uri(context.manifest_item.output_prefix, "inpainted/final.png")
+        writer.artifact_uri(
+            context.manifest_item.output_prefix,
+            final_artifact_relative_name(outcome.status),
+        )
         if outcome.final_image is not None
         else None
     )

@@ -25,7 +25,7 @@ def config_payload() -> dict[str, object]:
         "background_removal": {
             "enabled": True,
             "detector_input": "white_background",
-            "final_image_input": "source_original",
+            "final_image_input": "white_background",
             "model_artifact_id": f"rmbg-{SHA_A}",
             "model_input_size": [1024, 1024],
         },
@@ -54,14 +54,14 @@ def config_payload() -> dict[str, object]:
         "safety_gate": {
             "enabled": True,
             "failure_policy": "block_unverified",
-            "per_detection_block": 0.4,
+            "per_detection_block": 0.5,
             "combined_warn": 0.25,
-            "combined_block": 0.55,
+            "combined_block": 0.9,
             "min_product_area_pixels": 500,
         },
         "inpainting": {
             "model_artifact_id": f"lama-{SHA_A}",
-            "input": "source_original",
+            "input": "white_background",
             "mask_dilation_pixels": 2,
             "mask_threshold": 127,
         },
@@ -106,7 +106,7 @@ def test_valid_config_is_hashed_and_exposes_manifest_policy(tmp_path) -> None:
 
     assert loaded.sha256 == __import__("hashlib").sha256(path.read_bytes()).hexdigest()
     assert loaded.config.manifest_policy.maximum_items == 5
-    assert loaded.config.inpainting.input == "source_original"
+    assert loaded.config.inpainting.input == "white_background"
 
 
 def test_ocr_config_accepts_the_inclusive_035_confidence_boundary(tmp_path) -> None:
@@ -167,13 +167,13 @@ def test_ocr_can_be_the_only_enabled_detector(tmp_path) -> None:
     assert loaded.detection.easyocr is not None
 
 
-def test_config_rejects_rmbg_as_final_inpainting_input(tmp_path) -> None:
+def test_config_rejects_original_as_final_inpainting_input(tmp_path) -> None:
     payload = config_payload()
-    payload["inpainting"]["input"] = "white_background"  # type: ignore[index]
+    payload["inpainting"]["input"] = "source_original"  # type: ignore[index]
     path = tmp_path / "config.yaml"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(InvalidConfigurationError, match="source_original"):
+    with pytest.raises(InvalidConfigurationError, match="white_background"):
         load_pipeline_config(path)
 
 

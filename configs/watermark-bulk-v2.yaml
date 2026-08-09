@@ -4,7 +4,7 @@ pipeline_version: watermark-bulk-v2
 background_removal:
   enabled: true
   detector_input: white_background
-  final_image_input: source_original
+  final_image_input: white_background
   model_artifact_id: rmbg-edce8866b860468c4bcb86f5bb65c39ce08c44bee9d24f08ed7375aaa4369df6
   model_input_size: [1024, 1024]
 
@@ -38,14 +38,14 @@ segmentation:
 safety_gate:
   enabled: true
   failure_policy: block_unverified
-  per_detection_block: 0.40
+  per_detection_block: 0.50
   combined_warn: 0.25
-  combined_block: 0.55
+  combined_block: 0.90
   min_product_area_pixels: 500
 
 inpainting:
   model_artifact_id: lama-f1b358ca24093b93a106183b98a3dea6e8ed09f3b43ea7251eb2c81e7b4575f6
-  input: source_original
+  input: white_background
   mask_dilation_pixels: 2
   mask_threshold: 127
 

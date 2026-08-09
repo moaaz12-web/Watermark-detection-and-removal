@@ -68,6 +68,14 @@ class ItemStatus(StrEnum):
     SKIPPED_NO_WATERMARK = "SKIPPED_NO_WATERMARK"
 
 
+def final_artifact_relative_name(status: ItemStatus) -> str:
+    if status is ItemStatus.SUCCEEDED:
+        return "inpainted/final.png"
+    if status is ItemStatus.BLOCKED_BY_SAFETY_GATE:
+        return "background_removed/final.png"
+    raise ValueError(f"status {status} cannot expose a final artifact")
+
+
 class Decision(StrEnum):
     INPAINTED = "INPAINTED"
     NO_WATERMARK = "NO_WATERMARK"
@@ -251,9 +259,6 @@ class ItemResult(OutputContractModel):
                 raise ValueError("SUCCEEDED cannot include errorCode")
             return self
 
-        if self.final_uri is not None:
-            raise ValueError("finalUri is forbidden for blocked, skipped, and failed results")
-
         valid_pairs = {
             ItemStatus.BLOCKED_BY_SAFETY_GATE: {Decision.UNVERIFIED, Decision.BLOCKED},
             ItemStatus.SKIPPED_NO_WATERMARK: {Decision.NO_WATERMARK},
@@ -265,6 +270,8 @@ class ItemResult(OutputContractModel):
             raise ValueError("FAILED requires errorCode")
         if self.status is not ItemStatus.FAILED and self.error_code is not None:
             raise ValueError("errorCode is only valid for FAILED results")
+        if self.status is not ItemStatus.BLOCKED_BY_SAFETY_GATE and self.final_uri is not None:
+            raise ValueError("finalUri is forbidden for skipped and failed results")
         return self
 
 

@@ -24,7 +24,7 @@ def write_worker_material(tmp_path: Path) -> tuple[Path, Path]:
         "background_removal": {
             "enabled": True,
             "detector_input": "white_background",
-            "final_image_input": "source_original",
+            "final_image_input": "white_background",
             "model_artifact_id": f"rmbg-{SHA_A}",
             "model_input_size": [1024, 1024],
         },
@@ -53,14 +53,14 @@ def write_worker_material(tmp_path: Path) -> tuple[Path, Path]:
         "safety_gate": {
             "enabled": True,
             "failure_policy": "block_unverified",
-            "per_detection_block": 0.4,
+            "per_detection_block": 0.5,
             "combined_warn": 0.25,
-            "combined_block": 0.55,
+            "combined_block": 0.9,
             "min_product_area_pixels": 1,
         },
         "inpainting": {
             "model_artifact_id": f"lama-{SHA_A}",
-            "input": "source_original",
+            "input": "white_background",
             "mask_dilation_pixels": 2,
             "mask_threshold": 127,
         },
@@ -445,7 +445,7 @@ def test_inference_builds_the_default_executor_when_none_is_injected(
     assert (output_root / "tenant_17/wm_batch/_COMPLETE.json").exists()
 
 
-def test_unverified_reference_gate_does_not_write_a_final_artifact(tmp_path: Path) -> None:
+def test_unverified_reference_gate_writes_background_removed_final(tmp_path: Path) -> None:
     config_path, model_manifest_path = write_worker_material(tmp_path)
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["safety_gate"]["min_product_area_pixels"] = 17
@@ -469,7 +469,8 @@ def test_unverified_reference_gate_does_not_write_a_final_artifact(tmp_path: Pat
     result = json.loads((item_root / "result.json").read_text(encoding="utf-8"))
     assert result["status"] == "BLOCKED_BY_SAFETY_GATE"
     assert result["decision"] == "UNVERIFIED"
-    assert "finalUri" not in result
+    assert result["finalUri"].endswith("/background_removed/final.png")
+    assert (item_root / "background_removed/final.png").exists()
     assert not (item_root / "inpainted/final.png").exists()
     assert background.calls == detection.calls == 1
     assert inpainting.calls == 0
