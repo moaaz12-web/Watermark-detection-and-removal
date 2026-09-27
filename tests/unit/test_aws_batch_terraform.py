@@ -109,7 +109,7 @@ def test_a6_job_definition_is_digest_gated_and_gpu_bounded() -> None:
     assert 'value="/tmp/watermark-worker/cache"' in compact
 
 
-def test_bulk_job_definition_uses_gpu_fallback_and_has_a_bounded_24_hour_retry_envelope() -> None:
+def test_bulk_job_definition_uses_gpu_fallback_and_has_a_bounded_48_hour_retry_envelope() -> None:
     compact = compact_terraform_text()
 
     assert 'instance_type=["g4dn.xlarge","g5.xlarge","g6.xlarge"]' in compact
@@ -147,7 +147,7 @@ def test_bulk_job_definition_uses_gpu_fallback_and_has_a_bounded_24_hour_retry_e
         not in compact
     )
     assert 'attempts=2' in compact
-    assert 'attempt_duration_seconds=86400' in compact
+    assert 'attempt_duration_seconds=172800' in compact
     assert 'action="RETRY"' in compact
     assert 'on_status_reason="HostEC2*"' in compact
     assert 'on_exit_code="6"' in compact

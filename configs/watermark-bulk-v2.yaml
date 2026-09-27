@@ -50,7 +50,7 @@ inpainting:
   mask_threshold: 127
 
 limits:
-  maximum_items: 10000
+  maximum_items: 25000
   maximum_compressed_bytes: 10000000
   maximum_width: 4096
   maximum_height: 4096

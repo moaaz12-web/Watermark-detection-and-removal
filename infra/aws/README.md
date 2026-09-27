@@ -16,8 +16,8 @@ packaged-config compatibility profiles and external-config command profiles:
 
 - `watermark-v1`, retaining the local-config compatibility path, capped by its five-item
   configuration with a 90-minute timeout and one attempt; and
-- `watermark-bulk-v1`, retaining the local-config compatibility path, capped by its 10,000-item
-  configuration with a 24-hour per-attempt
+- `watermark-bulk-v1`, retaining the local-config compatibility path, capped by its 25,000-item
+  configuration with a 48-hour per-attempt
   timeout and two attempts. The bulk definition retries EC2 host failures and worker exit codes
   `6` and `7`, which represent retryable storage and external-service failures. All other worker
   exits fail immediately.

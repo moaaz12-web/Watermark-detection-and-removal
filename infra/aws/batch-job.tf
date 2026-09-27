@@ -212,7 +212,7 @@ resource "aws_batch_job_definition" "gpu_worker_bulk" {
   }
 
   timeout {
-    attempt_duration_seconds = 86400
+    attempt_duration_seconds = 172800
   }
 
   tags = {
@@ -327,7 +327,7 @@ resource "aws_batch_job_definition" "gpu_worker_bulk_v2" {
   }
 
   timeout {
-    attempt_duration_seconds = 86400
+    attempt_duration_seconds = 172800
   }
 
   tags = {
@@ -380,7 +380,7 @@ resource "aws_batch_job_definition" "gpu_worker_bulk_v2_external" {
   }
 
   timeout {
-    attempt_duration_seconds = 86400
+    attempt_duration_seconds = 172800
   }
 
   tags = {
