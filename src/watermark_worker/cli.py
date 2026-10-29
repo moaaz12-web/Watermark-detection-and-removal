@@ -607,7 +607,9 @@ def run(
             output_bucket=loaded_config.config.storage.output_bucket,
         ),
         run=run_identity,
-        entries_prevalidated=manifest.pipeline_version == "watermark-bulk-v1",
+        # Both bulk pipelines already validate entries when writing or reusing each item.
+        entries_prevalidated=manifest.pipeline_version
+        in {"watermark-bulk-v1", "watermark-bulk-v2"},
     )
     job_finalization_milliseconds = _elapsed_milliseconds(job_finalization_started)
     worker_wall_milliseconds = _elapsed_milliseconds(worker_started)

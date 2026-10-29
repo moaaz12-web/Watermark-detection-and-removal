@@ -13,6 +13,7 @@ from watermark_worker import cli as cli_module
 from watermark_worker.cli import entrypoint
 from watermark_worker.errors import RetryableStorageError
 from watermark_worker.result_writer import ResultWriter
+from watermark_worker.storage import LocalStorageAdapter, StoredObject
 
 SHA_A = "a" * 64
 
@@ -477,11 +478,40 @@ def test_unverified_reference_gate_writes_background_removed_final(tmp_path: Pat
     assert background.closed == detection.closed == inpainting.closed == 1
 
 
+@pytest.mark.parametrize(
+    ("pipeline_version", "expected_result_reads"),
+    [
+        ("watermark-v1", 20),
+        ("watermark-v2", 20),
+        ("watermark-bulk-v1", 0),
+        ("watermark-bulk-v2", 0),
+    ],
+)
 def test_reference_batch_isolates_one_corrupt_item_across_five_items(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pipeline_version: str,
+    expected_result_reads: int,
 ) -> None:
     config_path, model_manifest_path = write_worker_material(tmp_path)
     manifest_path = write_local_manifest(tmp_path, item_count=5, corrupt_item=2)
+    for path, key in ((config_path, "pipeline_version"), (manifest_path, "pipelineVersion")):
+        material = json.loads(path.read_text(encoding="utf-8"))
+        material[key] = pipeline_version
+        path.write_text(json.dumps(material), encoding="utf-8")
+
+    result_reads: list[str] = []
+    original_read = LocalStorageAdapter.read_bytes
+
+    def record_read(
+        storage: LocalStorageAdapter, uri: str, *, generation: str | None = None
+    ) -> StoredObject:
+        stored = original_read(storage, uri, generation=generation)
+        if "/asset_" in uri and uri.endswith(("/result.json", "/_COMPLETE.json")):
+            result_reads.append(uri)
+        return stored
+
+    monkeypatch.setattr(LocalStorageAdapter, "read_bytes", record_read)
     output_root = tmp_path / "output"
     executor, background, detection, inpainting = reference_executor(config_path)
 
@@ -496,6 +526,8 @@ def test_reference_batch_isolates_one_corrupt_item_across_five_items(
     )
 
     assert exit_code == 0
+    assert len(result_reads) == expected_result_reads
+    assert (output_root / "tenant_17/wm_batch/_COMPLETE.json").is_file()
     output_manifest = json.loads(
         (output_root / "tenant_17/wm_batch/output-manifest.json").read_text(encoding="utf-8")
     )
