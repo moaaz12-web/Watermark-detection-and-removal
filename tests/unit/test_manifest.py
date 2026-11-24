@@ -102,22 +102,38 @@ def test_manifest_uri_must_match_trusted_job_prefix() -> None:
         )
 
 
-def test_bulk_manifest_rejects_more_than_25000_items() -> None:
-    manifest = InputManifest.model_validate(gcs_payload()).model_copy(
-        update={
-            "pipeline_version": "watermark-bulk-v1",
-            "items": InputManifest.model_validate(gcs_payload()).items * 25_001,
+@pytest.mark.parametrize("pipeline_version", ["watermark-bulk-v1", "watermark-bulk-v2"])
+@pytest.mark.parametrize("item_count", [30_000, 30_001])
+def test_bulk_manifest_item_limit(pipeline_version: str, item_count: int) -> None:
+    payload = gcs_payload()
+    payload["pipelineVersion"] = pipeline_version
+    payload["items"] = [
+        {
+            "itemId": f"asset_{index}",
+            "inputUri": f"gs://input-bucket/tenant_17/wm_123/asset_{index}.png",
+            "inputGeneration": "1721210300123456",
+            "outputPrefix": f"gs://output-bucket/tenant_17/wm_123/asset_{index}/",
+            "sourceChecksumSha256": SHA,
         }
-    )
+        for index in range(item_count)
+    ]
+    manifest = InputManifest.model_validate(payload)
     bulk_policy = ManifestPolicy(
-        pipeline_version="watermark-bulk-v1",
-        maximum_items=25_000,
+        pipeline_version=pipeline_version,
+        maximum_items=30_000,
         allowed_manifest_buckets={"manifest-bucket"},
         allowed_input_buckets={"input-bucket"},
         output_bucket="output-bucket",
     )
 
-    with pytest.raises(InvalidManifestError, match="maximum is 25000"):
+    if item_count > 30_000:
+        with pytest.raises(InvalidManifestError, match="maximum is 30000"):
+            validate_manifest(
+                manifest,
+                bulk_policy,
+                manifest_uri="gs://manifest-bucket/tenant_17/wm_123/input-manifest.json",
+            )
+    else:
         validate_manifest(
             manifest,
             bulk_policy,

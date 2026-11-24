@@ -339,7 +339,7 @@ def test_frozen_pipeline_v1_matches_its_model_manifest() -> None:
     ]
 
 
-def test_bulk_pipeline_uses_the_same_models_with_a_25000_item_limit() -> None:
+def test_bulk_pipeline_uses_the_same_models_with_a_30000_item_limit() -> None:
     small = load_pipeline_config(PROJECT_ROOT / "configs" / "watermark-v1.yaml")
     bulk = load_pipeline_config(PROJECT_ROOT / "configs" / "watermark-bulk-v1.yaml")
     loaded_models = load_model_manifest(PROJECT_ROOT / "model-manifest.json")
@@ -347,7 +347,7 @@ def test_bulk_pipeline_uses_the_same_models_with_a_25000_item_limit() -> None:
     validate_model_bindings(bulk.config, loaded_models.manifest)
 
     assert bulk.config.pipeline_version == "watermark-bulk-v1"
-    assert bulk.config.limits.maximum_items == 25_000
+    assert bulk.config.limits.maximum_items == 30_000
     assert bulk.config.model_artifact_ids == small.config.model_artifact_ids
     assert bulk.config.background_removal == small.config.background_removal
     assert bulk.config.detection == small.config.detection
@@ -361,7 +361,7 @@ def test_bulk_pipeline_uses_the_same_models_with_a_25000_item_limit() -> None:
     ("config_name", "pipeline_version", "maximum_items"),
     [
         ("watermark-v2.yaml", "watermark-v2", 5),
-        ("watermark-bulk-v2.yaml", "watermark-bulk-v2", 25_000),
+        ("watermark-bulk-v2.yaml", "watermark-bulk-v2", 30_000),
     ],
 )
 def test_ocr_v2_pipelines_bind_easyocr_and_keep_v1_models_pinned(
